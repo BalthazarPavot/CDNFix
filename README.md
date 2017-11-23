@@ -24,22 +24,26 @@ efficient (slow and conspicuous).
 So why this script?
 -------------------
 
-For educationnal purpose. That's all.
-"Gneu gneu gneu... thats not educationnal, that's just dangerous!"
-Yes it is, grumpy human. It is for me. I did this script for ME to
-learn how ARP works, how DNS works, etc. So, anybody can code this
-kind of script (and that's the reason why I did not use scapy to
-craft packets and used raw sockets).
+For educational purpose. That's all.
 
-This answers the question of it's inefficiency: it was just a toy and
-my LAN was my playground.
+"Gneu gneu gneu... thats not educational, that's just dangerous!"
+
+Yes it is, grumpy human. It is, for me.
+I did this script for me to learn how ARP, DNS, packets, routers,...
+worked on a LAN (and that's the reason why I did not use scapy to
+craft packets and I used raw sockets). Anybody can code this kind
+of script, so no, it's not dangerous to put it on the internet.
+
+I think that also answers the question "why is it inefficienct?": It
+was just a toy and my LAN (2 computers lol) was my playground.
 
 
 And after?
 ----------
 
-I'll use this script for myself on my LAN. I'll ellaborate it, fux the
-bugs, and that's all. I'll perhaps use my pydget library to build a
+I'll use this script for myself on my LAN. I'll ellaborate it, fix the
+bugs, and that's all. I'll perhaps use my
+[pydget](https://github.com/BalthazarPavot/pydget) library to build a
 GUI, one day...
 
 
