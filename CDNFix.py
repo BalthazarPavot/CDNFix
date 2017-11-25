@@ -539,6 +539,119 @@ class Layer6(Layer5):
     return self.layer5_offset + self.layer6_length
 
 
+class Layer7(Layer6):
+
+  ## DNS OLD VALUES. NEED TO BE CHANGED
+  DNS_PORT = pack("!H", 0x0035)
+  DNS_TRANS_ID_SLICE = slice(0, 2)
+  DNS_FLAGS_SLICE = slice(2, 4)
+  DNS_QUERY = 0
+  DNS_RESPONSE = 1
+  DNS_QUESTIONS_SLICE = slice(4, 6)
+  DNS_ANSWER_RRS_SLICE = slice(6, 8)
+  DNS_AUTHORITY_RRS_SLICE = slice(8, 10)
+  DNS_ADD_RRS_SLICE = slice(10, 12)
+
+  @property
+  def is_dns(self):
+    return \
+      self.contains_ipv4 and \
+      self.has_dns_port and \
+      self.udp_checksum == self.udp_computed_checksum
+
+  @property
+  def has_dns_port(self):
+    if self.is_tcp:
+      return self.tcp_destination_port == Layer7.DNS_PORT
+    elif self.is_udp:
+      return self.udp_destination_port == Layer7.DNS_PORT
+    return False
+
+  @property
+  def dns_trans_id(self):
+    return self[Layer7.DNS_TRANS_ID_SLICE, self.layer6_offset]
+
+  @dns_trans_id.setter
+  def dns_trans_id(self, trans_id):
+    self[Layer7.DNS_TRANS_ID_SLICE, self.layer6_offset] = trans_id
+
+  @property
+  def is_dns_query(self):
+    return (unpack("!2B", self.dns_flags)[0] >> 7) == 0
+
+  @property
+  def is_dns_answer(self):
+    return (unpack("!2B", self.dns_flags)[0] >> 7) == 1
+
+  @property
+  def dns_flags(self):
+    return self[Layer7.DNS_FLAGS_SLICE, self.layer6_offset]
+
+  @dns_flags.setter
+  def dns_flags(self, flags):
+    self[Layer7.DNS_FLAGS_SLICE, self.layer6_offset] = flags
+
+  @property
+  def dns_questions(self):
+    return self[Layer7.DNS_QUESTIONS_SLICE, self.layer6_offset]
+
+  @dns_questions.setter
+  def dns_questions(self, questions):
+    self[Layer7.DNS_QUESTIONS_SLICE, self.layer6_offset] = questions
+
+  @property
+  def dns_answer_rrs(self):
+    return self[Layer7.DNS_ANSWER_RRS_SLICE, self.layer6_offset]
+
+  @dns_answer_rrs.setter
+  def dns_answer_rrs(self, answer_rrs):
+    self[Layer7.DNS_ANSWER_RRS_SLICE, self.layer6_offset] = answer_rrs
+
+  @property
+  def dns_authority_rrs(self):
+    return self[Layer7.DNS_AUTHORITY_RRS_SLICE, self.layer6_offset]
+
+  @dns_authority_rrs.setter
+  def dns_authority_rrs(self, authority_rrs):
+    self[Layer7.DNS_AUTHORITY_RRS_SLICE, self.layer6_offset] = authority_rrs
+
+  @property
+  def dns_additionnal_rrs(self):
+    return self[Layer7.DNS_ADD_RRS_SLICE, self.layer6_offset]
+
+  @dns_additionnal_rrs.setter
+  def dns_additionnal_rrs(self, additionnal_rrs):
+    self[Layer7.DNS_ADD_RRS_SLICE, self.layer6_offset] = additionnal_rrs
+
+  @property
+  def dns_data(self):
+    return DNSData(self.raw_data)
+
+  @property
+  def dns_queries(self):
+    return DNSData.parse_queries(self)
+
+  @dns_queries.setter
+  def dns_queries(self, queries):
+    self[DNSData.parse_queries_slice(self), self.layer6_offset] = queries
+
+  @property
+  def dns_answers(self):
+    return DNSData.parse_answers(self)
+
+  @dns_answers.setter
+  def dns_answers(self, answers):
+    self[DNSData.parse_answers_slice(self), self.layer6_offset] = answers
+
+  @property
+  def dns_additional_records(self):
+    return DNSData.parse_add_recors(self)
+
+  @dns_additional_records.setter
+  def dns_additional_records(self, additional_records):
+    self[DNSData.parse_add_records_slice(self), self.layer6_offset] = additional_records
+
+
 class Context(object):
 
   def __init__(
