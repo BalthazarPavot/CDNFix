@@ -815,12 +815,8 @@ class Context(object):
   Also allow to gather some info.
   """
 
-  def __init__(
-    self, device, router_ip, hosts, options
-  ):
+  def __init__(self, device, options):
     self.device = device
-    self.router_ip = router_ip
-    self.hosts = hosts
     self.options = options
     self.arp_table = {}
     self.dns_spoofer = None
@@ -829,48 +825,84 @@ class Context(object):
     self.gather_informations()
     if not self.options.dns_ip:
       self.options.dns_ip = self.ip
-    #self.chech_everything()
     self.check_options()
 
-  def gather_informations(self):
-    logger.info("Detecting our IP and MAC address...")
-    self.ip = self.detect_self_ip()
-    self.mac = self.detect_self_mac()
-    if self.ip:
-      if self.mac:
-        logger.info("IP=%s ; MAC=%s" % (self.ip, self.mac))
-      else:
-        logger.critical("Could not detect our own IP.")
-    else:
-      logger.critical("Could not detect our own IP.")
-    self.gather_router_mac()
-    if self.know_router_mac():
-      logger.info("Router MAC detected: %s." % self.get_router_mac())
-    else:
-      logger.info("Could not find router MAC. Trying later with ARP.")
+  @property
+  def ip(self):
+    return self._ip
 
-  def know_router_mac(self):
-    return self.router_ip in self.arp_table
+  @ip.setter
+  def ip(self, ip):
+    self._ip = ip
 
-  def get_router_mac(self):
+  @property
+  def mac(self):
+    return self._mac
+
+  @mac.setter
+  def mac(self, mac):
+    self._mac = mac
+
+  @property
+  def router_ip(self):
+    if self.options.router_ip:
+      return self.options.router_ip
+    return self._router_ip
+
+  @router_ip.setter
+  def router_ip(self, ip):
+    self._router_ip = ip
+
+  @property
+  def router_mac(self):
+    if self.options.router_mac:
+      return self.options.router_mac
+    if self.router_ip in self.arp_table:
+      if time.time() - self.arp_table[self.router_ip][1] > 3600:
+        self.guess_router_mac()
+    else:
+      self.guess_router_mac()
     return self.arp_table.get(self.router_ip, [None])[0]
 
-  def gather_router_mac(self):
+  @router_mac.setter
+  def router_mac(self, mac):
+    if mac is not None:
+      self.arp_table[self.router_ip] = (mac, time.time())
+
+  def guess_router_mac(self):
     cmd = " | ".join((
       "arp -n %(router_ip)s 2> /dev/null",  # show arp table
-      "grep -Po '\S+\s+\S+\s+%(device)s'",  # filter on device
+      "grep -Po '(\S+\s+){2}%(device)s'",  # filter on device
       "cut -d' ' -f1"                       # get first part
     )) % {
       "router_ip": self.router_ip,
       "device": self.device,
     }
-    mac = os.popen(cmd).read().strip()
-    if mac:
-      self.update_router_mac(mac)
-    return self.get_router_mac()
+    self.router_mac = os.popen(cmd).read().strip()
 
-  def update_router_mac(self, mac):
-    self.arp_table[self.router_ip] = (mac, time.time())
+  def gather_informations(self):
+    self.ip = self.detect_self_ip()
+    self.mac = self.detect_self_mac()
+    if self.ip:
+      logger.info("Detecting our IP     ... %s" % self.ip)
+    else:
+      logger.critical("Could not detect our own IP.")
+    if self.mac:
+      logger.info("Detecting our MAC    ... %s" % self.mac)
+    else:
+      logger.critical("Could not detect our own MAC.")
+    if self.options.router_ip is None:
+      self.router_ip = self.detect_router_ip()
+      if self.router_ip:
+        logger.info("Detecting router IP  ... %s" % self.router_ip)
+      else:
+        logger.critical("Could not find router IP.")
+    if self.options.router_mac is None:
+      self.router_mac = self.detect_router_mac()
+      if self.router_mac:
+        logger.info("Detecting router MAC ... %s" % self.router_mac)
+      else:
+        logger.info("Could not find router MAC. Trying later with ARP.")
 
   def detect_self_ip(self):
     cmd = " | ".join((
@@ -902,6 +934,19 @@ class Context(object):
     }
     return os.popen(cmd).read().strip()
 
+  def detect_router_mac(self):
+    if self.options.router_mac:
+      return self.options.router_mac
+    cmd = " | ".join((
+      "arp -n %(router_ip)s 2> /dev/null",  # show arp table
+      "grep -Po '(\S+\s+){2}%(device)s'",  # filter on device
+      "cut -d' ' -f1"                       # get first part
+    )) % {
+      "router_ip": self.router_ip,
+      "device": self.device,
+    }
+    return os.popen(cmd).read().strip()
+
   def get_possible_devices(self):
     return os.popen(" | ".join((
       "ip link show",               # show interfaces
@@ -914,7 +959,7 @@ class Context(object):
       "route -n",                       # show routing table
       "grep -Po '(\S+\s+){2}[UG]{2}'",  # filter on U(p)G(ateaway)
       "cut -d' ' -f1"                   # get first part
-    ))).read()
+    ))).read().strip()
 
   def chech_everything(self):
     self.check_mandatory()
@@ -922,8 +967,8 @@ class Context(object):
 
   def check_mandatory(self):
     self.check_device()
-    self.check_router_ip()
     self.check_hosts()
+    self.check_targets()
 
   def check_options(self):
     self.check_pid_path()
@@ -961,11 +1006,18 @@ class Context(object):
     logger.debug("Router IP: %-16s   [OK]" % self.router_ip)
 
   def check_hosts(self):
-    if not os.path.exists(self.hosts):
-      logger.critical("%s does not exists." % self.hosts)
-    elif not os.path.getsize(self.hosts):
+    if not os.path.exists(self.options.hosts):
+      logger.critical("%s does not exists." % self.options.hosts)
+    elif not os.path.getsize(self.options.hosts):
       logger.critical("Empty host file")
-    logger.debug("Hosts:     %-16s   [OK]" % self.hosts[-17:])
+    logger.debug("Hosts:     %-16s   [OK]" % self.options.hosts[-17:])
+
+  def check_targets(self):
+    if not os.path.exists(self.options.targets):
+      logger.critical("%s does not exists." % self.options.targets)
+    elif not os.path.getsize(self.options.targets):
+      logger.critical("Empty host file")
+    logger.debug("Hosts:     %-16s   [OK]" % self.options.targets[-17:])
 
   def check_pid_path(self):
     pass
@@ -1233,7 +1285,7 @@ class DNSSpoofer(object):
     self.ctx.source_ip = socket.inet_ntoa(packet.ip_ip_source)
     self.ctx.source_mac = printable_mac(self.ctx.raw_source_mac)
     self.ctx.router_ip = self.context.router_ip
-    self.ctx.router_mac = self.context.get_router_mac()
+    self.ctx.router_mac = self.context.router_mac
     self.ctx.raw_router_ip = pack(
       "!4B", *map(int, self.ctx.router_ip.split("."))
     )
@@ -1269,7 +1321,7 @@ class DNSSpoofer(object):
     return dns
 
   def forward_to_router(self, dns):
-    if not self.context.know_router_mac():
+    if not self.context.router_mac:
       dns_logger.error(
         "Could not forward DNS query! Packet lost!", color=RED
       )
@@ -1277,8 +1329,8 @@ class DNSSpoofer(object):
       self.ctx.raw_source_ip, self.ctx.raw_source_mac
     )
     if self.ctx.router_mac:
-      dns_logger.info("Forwarding DNS query %s to router." % (
-        ''.join(["0x%02x"%i for i in dns.dns_trans_id])
+      dns_logger.info("Forwarding DNS query 0x%s to router." % (
+        ''.join(["%02x"%i for i in dns.dns_trans_id])
       ))
       dns.eth_mac_target = self.ctx.raw_router_mac
       dns.ip_ip_target = self.ctx.raw_router_ip
@@ -1389,56 +1441,101 @@ def add_logger_color(logger_method, _color):
     )
   return wrapper
 
-def parse_arguments():
+def create_option_parser():
   parser = optparse.OptionParser(
-    usage="%prog [OPTIONS] device router_ip hosts" \
-    "hosts\nInvokes a great and awful firewall like the one in " \
-    "China (no). Redirect users on your lan, using the given host " \
-    "file.\nUses ARP poisoning and DNS spoofing."
+    usage="python3 ./%prog interface [OPTIONS]\n" \
+    "\tPrevent CDN to track your online activity.\n" \
+    "\tRedirect users' queries according to the host file rules.\n" \
+    "\tUses ARP poisoning and DNS spoofing."
   )
+  set_global_parser_options(parser)
+  arp_group = optparse.OptionGroup(parser, "ARP Options")
+  set_arp_parser_options(arp_group)
+  parser.add_option_group(arp_group)
+  dns_group = optparse.OptionGroup(parser, "DNS Options")
+  set_dns_parser_options(dns_group)
+  parser.add_option_group(dns_group)
+  return parser
+
+def set_global_parser_options(parser):
   prog = os.path.basename(sys.argv[0])
   parser.add_option(
-    "-p",
+    "-p", "--pid_file",
     dest="pidfile",
     default="/tmp/%s.pid" % prog,
     help="The file path where to store our PID (Default=/tmp/%s.pid)."%prog,
-    metavar="PID_FILE"
+    metavar="FILE"
   )
-  arp_group = optparse.OptionGroup(parser, "ARP Options")
+  parser.add_option(
+    "-r", "--router_ip",
+    dest="router_ip",
+    default=None,
+    help="The IP of the router. " \
+      "Guessed using `route` if not provided.",
+    metavar="IP"
+  )
+  parser.add_option(
+    "-m", "--router_mac",
+    dest="router_mac",
+    default=None,
+    help="The MAC of the router. " \
+      "Guessed using the `arp` command if not provided. " \
+      "Found using ARP queries if not found.",
+    metavar="MAC"
+  )
+  parser.add_option(
+    "-H", "--hosts_file",
+    dest="hosts",
+    default="hosts",
+    help="The host file that tells the routing rules.",
+    metavar="FILE"
+  )
+  parser.add_option(
+    "-t", "--targets_file",
+    dest="targets",
+    default="targets",
+    help="The file containing the targeted IPs.",
+    metavar="FILE"
+  )
+
+def set_arp_parser_options(arp_group):
   arp_group.add_option(
-    "-A", 
+    "-A", "--no_arp", 
     dest="no_arp",
     action="store_true",
     default=False,
     help="Deactivates the ARP poisoner (harmless ARP Server mode).",
   )
   arp_group.add_option(
-    "-r", 
+    "-i", "--interactive", 
     dest="respond_only",
     action="store_true",
     default=True,
     help="Only send ARP responses when asked to by other devices.",
   )
   arp_group.add_option(
-    "-t", 
+    "-e", "--elapse_time", 
     dest="arp_elapse_time",
     default=1,
     type="int",
     help="Time ellapsed between two ARP responses. Ignored if -r is set.",
     metavar="MILISECONDS"
   )
-  parser.add_option_group(arp_group)
-  dns_group = optparse.OptionGroup(parser, "DNS Options")
+
+def set_dns_parser_options(dns_group):
   dns_group.add_option(
-    "-d",
+    "-d", "--dns_ip",
     dest="dns_ip",
     default=None,
-    help="The IP adress of the DNS.",
-    metavar="DNS_IP"
+    help="The IP adress of the DNS. " \
+    "Our own IP is used if not provided.",
+    metavar="IP"
   )
-  parser.add_option_group(dns_group)
+
+def parse_arguments():
+  parser = create_option_parser()
   options, arguments = parser.parse_args()
-  if len(arguments) != 3:
+  if len(arguments) != 1:
     # manualy trigger the help. 
     parser.parse_args(["-h"])
   return Context(*arguments, options)
@@ -1498,6 +1595,7 @@ if __name__ == "__main__":
 
   if os.getuid() != 0:
     print("You need to be root to run this program.")
+    create_option_parser().parse_args(["-h"])
     exit()
   # we lower privelege everywhere.
   # we will upper privilege only when needed.
