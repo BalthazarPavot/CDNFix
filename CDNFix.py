@@ -28,6 +28,17 @@ NO_COLOR = "\33[m"
 
 class Packet(object):
 
+  """
+  Represent any network packet. No matter what the protocols are.
+  setitem and getitem accept only slices.
+  These slices can be moved by a given offset:
+  >>> packet = Packet("abcdefghijklmnop")
+  >>> packet[0:4]
+  abcd
+  >>> packet[0:4,3] # equivalant to packet[0+3:4+3]
+  defg
+  """
+
   def __init__(self, raw_data=None):
     if raw_data is None:
       raw_data = b""
@@ -65,7 +76,9 @@ class Packet(object):
 class Layer3(Packet):
 
   """
-  third layer of the OSI model.
+  Third layer of the OSI model.
+  Only Ethernet is implemented.
+  Enternet methods prexif: eth_
   """
 
   ## ETH
@@ -129,6 +142,15 @@ class Layer3(Packet):
 
 
 class Layer4(Layer3):
+
+  """
+  Fourth layer of the OSI model.
+  Only IP+TCP/UDP and ARP are implemented.
+  IP methods prexif: ip_
+  TCP methods prexif: tcp_
+  UDP methods prexif: udp_
+  ARP methods prexif: arp_
+  """
 
   ## IP
   IP_VERSION_SLICE = slice(0, 1)
@@ -549,6 +571,12 @@ class Layer6(Layer5):
 
 class Layer7(Layer6):
 
+  """
+  Seventh layer of the OSI model.
+  Only DNS is implemented.
+  DNS methods prexif: dns_
+  """
+
   ## DNS OLD VALUES. NEED TO BE CHANGED
   DNS_PORT = pack("!H", 0x0035)
   DNS_TRANS_ID_SLICE = slice(0, 2)
@@ -662,6 +690,11 @@ class Layer7(Layer6):
 
 class DNSData(object):
 
+  """
+  DNS rr section parser.
+  Slices' offset is the begining of the DNS rr.
+  """
+
   ## ANSWER AND QUERY
   DNS_IP_TYPE_SLICE = slice(0, 2)             ## AFTER NAME.
   DNS_CLASS_SLICE = slice(2, 4)               ## AFTER NAME.
@@ -774,6 +807,13 @@ class DNSData(object):
 
 
 class Context(object):
+
+  """
+  The global context of the program.
+  Contains parameters, options, arp table.
+  Has reference to the DNS and ARP spoofers.
+  Also allow to gather some info.
+  """
 
   def __init__(
     self, device, router_ip, hosts, options
@@ -934,6 +974,17 @@ class Context(object):
 
 class TmpCtx(dict):
 
+  """
+  Dict which keys are also attributes:
+    ctx["something"] == ctx.something
+
+  Temp context to store the most used packet's info:
+    router raw/displayable mac/ip
+    source raw/displayable mac/ip
+    target raw/displayable mac/ip
+  Can be used to store anything in fact.
+  """
+
   def __init__(self, *args, **kwargs):
     super().__init__(*args, **kwargs)
 
@@ -947,6 +998,10 @@ class TmpCtx(dict):
 
 
 class ARPPoisoner(Thread):
+
+  """
+  The ARP Sniffer/Poisoner.
+  """
 
   def __init__(self, context):
     super().__init__()
@@ -1111,6 +1166,10 @@ class ARPPoisoner(Thread):
 
 class DNSSpoofer(object):
 
+  """
+  The DNS Sniffer/Spoofer.
+  """
+
   def __init__(self, context):
     self.context = context
     self.running = False
@@ -1199,6 +1258,7 @@ class DNSSpoofer(object):
 
   def forge_response(self, dns, server_name):
     dns_logger.info("Forge DNS response for %s [TODO]" % server_name)
+    ## should set IP, MAC, ports, add response and update checksum
     return dns
 
   def forward_to_router(self, dns):
@@ -1428,7 +1488,6 @@ def remove_pid_file(path):
 
 
 if __name__ == "__main__":
-
 
   if os.getuid() != 0:
     print("You need to be root to run this program.")
