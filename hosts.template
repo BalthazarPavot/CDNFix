@@ -1,0 +1,33 @@
+######################################################################
+##                                                                  ##
+##                            HOSTS FILE                            ##
+##                                                                  ##
+######################################################################
+##                                                                  ##
+##                                                                  ##
+## This file tells where to redirect connexions when a someone try  ##
+## to reach the given name server.                                  ##
+##                                                                  ##
+## The syntax of an entry is:                                       ##
+##  server_name[TAB(s)|SPACE(s)]IP                                  ##
+##                                                                  ##
+## The syntax for a uniline comment is:                             ##
+##  # your comment                                                  ##
+## There are not multiline comments. It think it is useless here.   ##
+##                                                                  ##
+##                                                                  ##
+######################################################################
+
+# let's say our own CDN replacement server's IP is 192.168.1.2
+
+ajax.googleapis.com	192.168.1.2
+ajax.aspnetcdn.com	192.168.1.2
+ajax.microsoft.com	192.168.1.2
+cdnjs.cloudflare.com	192.168.1.2
+code.jquery.com	192.168.1.2
+cdn.jsdelivr.net	192.168.1.2
+yastatic.net	192.168.1.2
+yandex.st	192.168.1.2
+libs.baidu.com	192.168.1.2
+lib.sinaapp.com	192.168.1.2
+upcdn.b0.upaiyun.com	192.168.1.2
