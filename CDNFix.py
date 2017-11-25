@@ -21,6 +21,8 @@ EMPTY_MAC = pack("!6B", *(0,)*6)
 EMPTY_IP = pack("!4B", *(0,)*4)
 RED, GREEN, ORANGE, BLUE, PURPLE, LBLUE, GREY = \
   map("\33[%dm".__mod__, range(31, 38))
+IRED, IGREEN, IORANGE, IBLUE, IPURPLE, ILBLUE, IGREY = \
+  map("\33[30;%dm".__mod__, range(41, 48))
 DNS_COLOR = GREY
 ARP_COLOR = PURPLE
 NO_COLOR = "\33[m"
@@ -1422,7 +1424,7 @@ def critical_callback():
 
 def color_logger(logger, overall_color=None, methods=None):
   if overall_color is None:
-    colors = GREY, GREEN, ORANGE, RED, BLUE
+    colors = GREY, GREEN, ORANGE, RED, IRED
   else:
     colors = (overall_color, ) * 5
   if methods is None:
