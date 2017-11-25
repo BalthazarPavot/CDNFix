@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 
+import array
 import atexit
 import logging
 import optparse
@@ -1234,7 +1235,6 @@ class DNSSpoofer(object):
 
 
 ## I stole the checksum calculation method from scapy (utils.py)
-import array
 if pack("H",1) == "\x00\x01": # big endian
   def _checksum(pkt):
     if len(pkt) % 2 == 1:
