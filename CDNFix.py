@@ -652,6 +652,119 @@ class Layer7(Layer6):
     self[DNSData.parse_add_records_slice(self), self.layer6_offset] = additional_records
 
 
+class DNSData(object):
+
+  ## ANSWER AND QUERY
+  DNS_IP_TYPE_SLICE = slice(0, 2)             ## AFTER NAME.
+  DNS_CLASS_SLICE = slice(2, 4)               ## AFTER NAME.
+  ## ANSWER ONLY
+  DNS_TTL_SLICE = slice(4, 8)                 ## AFTER NAME.
+  DNS_DATA_LENGTH_SLICE = slice(8, 10)        ## AFTER NAME.
+  DNS_IP_SLICE = slice(10, 14)                ## AFTER NAME.
+
+  DNS_A_TYPE = pack("!H", 0x0001)             ## ASK FOR IPV4 
+  DNS_AAAA_TYPE = pack("!H", 0x001c)          ## ASK FOR IPV6
+  DNS_IN_CLASS = pack("!H", 0x0001)           ## REGULAR DNS QUERY
+  ## HIGH TTL MUST NOT EXCEED 1 WEEK: RFC 1035
+  DNS_TTL_HIGH_VALUE = pack("!I", 0x1517f)    ## 23h 59m 59s
+
+  @staticmethod
+  def parse_queries_slice(layer7):
+    amount = unpack("!H", layer7.dns_questions)[0]
+    offset = layer7.layer6_offset
+    start = stop = Layer7.DNS_ADD_RRS_SLICE.stop+offset
+    for _ in range(amount):
+      stop += layer7[stop:].index(b"\0")+1
+    return slice(start-offset, stop-offset)
+
+  @staticmethod
+  def parse_answers_slice(layer7):
+    amount = unpack("!H", layer7.dns_answer_rrs)[0]
+    offset = layer7.layer6_offset
+    start = stop = \
+      DNSData.parse_queries_slice(layer7).stop+offset
+    for _ in range(amount):
+      # a pointer
+      if unpack("!B", layer7[stop])[0] & 0b11000000:
+        stop += 16
+      else:
+        # name length + 14 (= other fields)
+        stop += layer7[stop:].index("\0") + 1 + 14
+    return slice(start-offset, stop-offset)
+
+  @staticmethod
+  def parse_add_records_slice(layer7):
+    return \
+      slice(DNSData.parse_answers_slice(layer7).stop, len(layer7))
+
+  def __init__(self, layer7):
+    dns_offset = layer7.layer6_offset
+    self._pre_data = layer7[dns_offset:dns_offset+12]
+    self.update_slices(layer7)
+
+  def update_slices(self, layer7):
+    offset = layer7.layer6_offset
+    self._queries = layer7[DNSData.parse_queries_slice(layer7), offset]
+    self._answers = layer7[DNSData.parse_answers_slice(layer7), offset]
+    self._add_records = layer7[DNSData.parse_add_records_slice(layer7), offset]
+
+  @property
+  def raw_data(self):
+    return b''.join((
+      self._pre_data, self.queries, self.answers, self.add_records
+    ))
+
+  @property
+  def queries_slice(self):
+    return slice(0, len(self.queries))
+
+  @property
+  def queries(self):
+    return self._queries
+
+  @queries.setter
+  def queries(self, queries):
+    self._queries = queries
+
+  @property
+  def query_name(self):
+    data = self.queries
+    domain_components = []
+    index = 0
+    length = data[0]
+    while length or not index:
+      domain_components.append(data[index+1:index+1+length])
+      index += length+1
+      length = data[index]
+    return b'.'.join(domain_components)
+
+  @property
+  def answers_slice(self):
+    start = self.queries_slice.stop
+    return slice(start, start+len(self.answers))
+
+  @property
+  def answers(self):
+    return self._answers
+
+  @answers.setter
+  def answers(self, answers):
+    self._answers = answers
+
+  @property
+  def add_records_slice(self):
+    start = self.answers_slice.stop
+    return slice(start, start+len(self.add_records))
+
+  @property
+  def add_records(self):
+    return self._add_records
+
+  @add_records.setter
+  def add_records(self, add_records):
+    self._add_records = add_records
+
+
 class Context(object):
 
   def __init__(
