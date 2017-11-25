@@ -938,6 +938,30 @@ class TmpCtx(dict):
     self[attr] = value
 
 
+## I stole the checksum calculation method from scapy (utils.py)
+import array
+if pack("H",1) == "\x00\x01": # big endian
+  def _checksum(pkt):
+    if len(pkt) % 2 == 1:
+      pkt += b"\0"
+    s = sum(array.array("H", pkt))
+    s = (s >> 16) + (s & 0xffff)
+    s += s >> 16
+    s = ~s
+    return s & 0xffff
+else:
+  def _checksum(pkt):
+    if len(pkt) % 2 == 1:
+      pkt += b"\0"
+    s = sum(array.array("H", pkt))
+    s = (s >> 16) + (s & 0xffff)
+    s += s >> 16
+    s = ~s
+    return (((s>>8)&0xff)|s<<8) & 0xffff
+
+def checksum(packet):
+  return _checksum(packet) or 0xffff
+
 def elevate_privilege():
   os.seteuid(0)
 
