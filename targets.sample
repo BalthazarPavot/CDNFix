@@ -1,0 +1,39 @@
+######################################################################
+##                                                                  ##
+##                           TARGETS FILE                           ##
+##                                                                  ##
+######################################################################
+##                                                                  ##
+##                                                                  ##
+## This file describes which IP are affected by CDNFix.             ##
+## The syntax of an entry is:                                       ##
+##  IP                                                              ##
+## or                                                               ##
+##  re:IP_regex                                                     ##
+##                                                                  ##
+## Note that the IP ".34" will be accepted, and it means:           ##
+##  The ip on the same network than CDNFix, finishing with .34      ##
+##                                                                  ##
+## For example:                                                     ##
+##  re:192.168.128.*                                                ##
+##  re:192.168.1.34-38                                              ##
+##  192.168.4.72                                                    ##
+##  re:.*  # This is the default behaviour                          ##
+##                                                                  ##
+##                                                                  ##
+## The IP should be on the same LAN as CDNFix.                      ##
+## CDNFix has been tested in a very simple LAN, so there are no any ##
+## guaranty it will work on multi subnets.                          ##
+##                                                                  ##
+## If you use more than one subnet, this script should be launched  ##
+## on the subnet the nearer from the internet router.               ##
+##                                                                  ##
+## The fact is, you probably know better than me where to place     ##
+## this program 'cause I am not good at networking.                 ##
+##                                                                  ##
+######################################################################
+
+
+# That's the basic config: Applied to all the network we're on.
+# The router IP will be ignored.
+re:.*
