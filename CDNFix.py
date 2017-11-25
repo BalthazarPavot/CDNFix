@@ -962,6 +962,12 @@ else:
 def checksum(packet):
   return _checksum(packet) or 0xffff
 
+def printable_ip(raw_ip):
+  return ".".join(map(str, raw_ip))
+
+def printable_mac(raw_mac):
+  return ":".join(["%02x"%(i&255)for i in raw_mac])
+
 def elevate_privilege():
   os.seteuid(0)
 
