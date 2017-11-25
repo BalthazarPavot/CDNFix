@@ -507,6 +507,38 @@ class Layer4(Layer3):
     self[Layer4.TCP_DATA, self.layer4_ip_offset] = tcp_data
 
 
+class Layer5(Layer4):
+
+  """
+  For the sake of ascending compatibility, I implement the Layer 5, 
+  even if it is never used.
+  """
+
+  @property
+  def layer5_length(self):
+    return 0
+
+  @property
+  def layer5_offset(self):
+    return self.layer4_offset + self.layer5_length
+
+
+class Layer6(Layer5):
+
+  """
+  For the sake of ascending compatibility, I implement the Layer 6, 
+  even if it is never used.
+  """
+
+  @property
+  def layer6_length(self):
+    return 0
+
+  @property
+  def layer6_offset(self):
+    return self.layer5_offset + self.layer6_length
+
+
 class Context(object):
 
   def __init__(
