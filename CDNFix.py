@@ -18,6 +18,42 @@ ARP_COLOR = PURPLE
 NO_COLOR = "\33[m"
 
 
+class Packet(object):
+
+  def __init__(self, raw_data=None):
+    if raw_data is None:
+      raw_data = b""
+    self.raw_data = raw_data
+
+  def __str__(self):
+    return self.raw_data
+
+  def __setitem__(self, index, item):
+    if not isinstance(index, slice):
+      index, offset = index
+    else:
+      offset = 0
+    index = slice(index.start+offset, index.stop+offset)
+    if len(self.raw_data) < index.stop:
+      self.raw_data += b"\0" * (index.stop - len(self.raw_data))
+    self.raw_data = \
+      self.raw_data[:index.start] + item + self.raw_data[index.stop:]
+
+  def __getitem__(self, index):
+    if not isinstance(index, slice):
+      index, offset = index
+    else:
+      offset = 0
+    index = slice(
+      index.start+offset,
+      (len(self)+1 if index.stop is None else index.stop)+offset
+    )
+    return self.raw_data[index]
+
+  def __len__(self):
+    return len(self.raw_data)
+
+
 class Context(object):
 
   def __init__(
