@@ -909,6 +909,13 @@ class Context(object):
       "cut -d' ' -f2"               # split and get just 'intf'
     ))).read().strip().split("\n")  # split on \n, ignoring trailing
 
+  def detect_router_ip(self):
+    return os.popen(" | ".join((
+      "route -n",                       # show routing table
+      "grep -Po '(\S+\s+){2}[UG]{2}'",  # filter on U(p)G(ateaway)
+      "cut -d' ' -f1"                   # get first part
+    ))).read()
+
   def chech_everything(self):
     self.check_mandatory()
     self.check_options()
