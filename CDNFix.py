@@ -54,6 +54,72 @@ class Packet(object):
     return len(self.raw_data)
 
 
+class Layer3(Packet):
+
+  """
+  third layer of the OSI model.
+  """
+
+  ## ETH
+  MAC_TARGET_SLICE = slice(0, 6)
+  MAC_SOURCE_SLICE = slice(6, 12)
+  PROTOCOL_SLICE = slice(12, 14)
+  DEC = pack("!H", 0x6000)
+  DEC2 = pack("!H", 0x0609)
+  XNS = pack("!H", 0x0600)
+  IPV4 = pack("!H", 0x0800)
+  ARP = pack("!H", 0x0806)
+  DOMAIN = pack("!H", 0x8019)
+  RARP = pack("!H", 0x8035)
+  APPLE_TALK = pack("!H", 0x809B)
+  P_802_1Q = pack("!H", 0x8100)
+  IPV6 = pack("!H", 0x86DD)
+
+  @property
+  def layer3_length(self):
+    return 14
+
+  @property
+  def layer3_offset(self):
+    return self.layer3_length
+
+  @property
+  def eth_mac_target(self):
+    return self[Layer3.MAC_TARGET_SLICE]
+
+  @eth_mac_target.setter
+  def eth_mac_target(self, mac_target):
+    self[Layer3.MAC_TARGET_SLICE] = mac_target
+
+  @property
+  def eth_mac_source(self):
+    return self[Layer3.MAC_SOURCE_SLICE]
+
+  @eth_mac_source.setter
+  def eth_mac_source(self, mac_source):
+    self[Layer3.MAC_SOURCE_SLICE] = mac_source
+
+  @property
+  def eth_data_protocol(self):
+    return self[Layer3.PROTOCOL_SLICE]
+
+  @eth_data_protocol.setter
+  def eth_data_protocol(self, eth_data_protocol):
+    self[Layer3.PROTOCOL_SLICE] = eth_data_protocol
+
+  @property
+  def contains_ipv4(self):
+    return self.eth_data_protocol == Layer3.IPV4
+
+  @property
+  def contains_arp(self):
+    return self.eth_data_protocol == Layer3.ARP
+
+  @property
+  def contains_ipv6(self):
+    return self.eth_data_protocol == Layer3.IPV6
+
+
 class Context(object):
 
   def __init__(
