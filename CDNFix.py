@@ -1437,7 +1437,7 @@ if __name__ == "__main__":
   # we will upper privilege only when needed.
   lower_privilege()
 
-  logging.basicConfig(format="[%(levelname)-8s] %(message)s", level=logging.DEBUG)
+  logging.basicConfig(format="[%(levelname)-12s] %(message)s", level=logging.DEBUG)
   logger = logging.getLogger(os.path.basename(__file__))
   color_logger(logger)
   logger.critical = attach_critical_callback(logger.critical)
@@ -1464,5 +1464,11 @@ if __name__ == "__main__":
 
   create_pid_file(context)
   atexit.register(remove_pid_file, context.options.pidfile)
+
+  context.arp_poisoner = ARPPoisoner(context)
+  context.dns_spoofer = DNSSpoofer(context)
+  context.arp_poisoner.start()
+  context.dns_spoofer.run()
+  context.arp_poisoner.stop()
 
   exit()
