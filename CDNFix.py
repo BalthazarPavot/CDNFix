@@ -919,6 +919,10 @@ class Context(object):
     if not match_ipv4(self.options.dns_ip):
       logger.error("Bad router IP adress.")
 
+  def is_valid_target(self, target):
+    ip, mac = target
+    return True
+
 
 def elevate_privilege():
   os.seteuid(0)
@@ -1042,7 +1046,6 @@ def match_ipv4 (ip):
     "(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$",
     ip
   ) is not None
-
 
 def match_ipv6 (ip):
   """ Test if the given ip is IPV6 """
