@@ -823,11 +823,8 @@ class Context(object):
     self.arp_table = {}
     self.dns_spoofer = None
     self.arp_poisoner = None
-    self.check_mandatory()
+    self.check_parameters()
     self.gather_informations()
-    if not self.options.dns_ip:
-      self.options.dns_ip = self.ip
-    self.check_options()
 
   @property
   def ip(self):
@@ -859,17 +856,23 @@ class Context(object):
   def router_mac(self):
     if self.options.router_mac:
       return self.options.router_mac
-    if self.router_ip in self.arp_table:
-      if time.time() - self.arp_table[self.router_ip][1] > 3600:
-        self.guess_router_mac()
-    else:
+    if time.time() - self.last_router_mac_update > 3600:
       self.guess_router_mac()
-    return self.arp_table.get(self.router_ip, [None])[0]
+    return self.arp_table[self.router_ip][0]
+
+  @property
+  def last_router_mac_update(self):
+    return self.arp_table[self.router_ip][1]
 
   @router_mac.setter
   def router_mac(self, mac):
-    if mac is not None:
-      self.arp_table[self.router_ip] = (mac, time.time())
+    self.arp_table[self.router_ip] = (mac or None, time.time())
+
+  @property
+  def dns_ip(self):
+    if self.options.dns_ip is None:
+      return self.ip
+    return self.options.dns_ip
 
   def guess_router_mac(self):
     cmd = " | ".join((
@@ -967,32 +970,24 @@ class Context(object):
     self.check_mandatory()
     self.check_options()
 
-  def check_mandatory(self):
+  def check_parameters(self):
     self.check_device()
     self.check_hosts()
     self.check_targets()
-
-  def check_options(self):
     self.check_pid_path()
+    self.check_router_ip()
+    self.check_router_mac()
     self.check_arp_options()
     self.check_dns_options()
-
-  def check_arp_options(self):
-    if not self.options.no_arp:
-      if self.options.arp_elapse_time <= 0:
-        logger.critical("Bad elapsed time.")
-
-  def check_dns_options(self):
-    self.check_dns_ip()
 
   def check_device(self):
     if self.device not in self.get_possible_devices():
       logger.critical(
-        "Bad device name: %s. Expencted one of those: %s" % (
+        "Bad device name: %s. Expected one of those: %s" % (
           self.device, ", ".join(self.get_possible_devices())
         )
       )
-    logger.debug("Device:    %-16s   [OK]" % self.device)
+    logger.debug("%-15s%-20s [OK]" % ("Device:", self.device))
     if not self.detect_self_ip():
       logger.critical(
         "You're not connected to any network with this device"
@@ -1002,31 +997,48 @@ class Context(object):
         "Could not get the mac adress associated to your device"
       )
 
-  def check_router_ip(self):
-    if not match_ipv4(self.router_ip):
-      logger.critical("Bad router IP adress.")
-    logger.debug("Router IP: %-16s   [OK]" % self.router_ip)
-
   def check_hosts(self):
     if not os.path.exists(self.options.hosts):
       logger.critical("%s does not exists." % self.options.hosts)
     elif not os.path.getsize(self.options.hosts):
       logger.critical("Empty host file")
-    logger.debug("Hosts:     %-16s   [OK]" % self.options.hosts[-17:])
+    logger.debug("%-15s%-20s [OK]" % ("Hosts:", self.options.hosts[-17:]))
 
   def check_targets(self):
     if not os.path.exists(self.options.targets):
       logger.critical("%s does not exists." % self.options.targets)
     elif not os.path.getsize(self.options.targets):
-      logger.critical("Empty host file")
-    logger.debug("Hosts:     %-16s   [OK]" % self.options.targets[-17:])
+      logger.critical("Empty targets file")
+    logger.debug("%-15s%-20s [OK]" % ("Targets:", self.options.targets[-17:]))
 
   def check_pid_path(self):
     pass
 
+  def check_router_ip(self):
+    if self.options.router_ip is not None:
+      if not match_ipv4(self.options.router_ip):
+        logger.critical("Bad router IP adress.")
+      logger.debug("%-15s%-20s [OK]" % ("Router IP:", self.options.router_ip))
+
+  def check_router_mac(self):
+    if self.options.router_mac is not None:
+      if not match_mac(self.options.router_mac):
+        logger.critical("Bad router MAC adress.")
+      logger.debug("%-15s%-20s [OK]" % ("Router MAC:", self.options.router_mac))
+
+  def check_arp_options(self):
+    if not self.options.no_arp:
+      if self.options.arp_elapse_time <= 0:
+        logger.critical("Bad elapsed time.")
+
+  def check_dns_options(self):
+    self.check_dns_ip()
+
   def check_dns_ip(self):
-    if not match_ipv4(self.options.dns_ip):
-      logger.error("Bad router IP adress.")
+    if self.options.dns_ip is not None:
+      if not match_ipv4(self.options.dns_ip):
+        logger.error("Bad router IP adress.")
+      logger.debug("%-15s%-20s [OK]" % ("DNS IP:", self.options.dns_ip))
 
   def is_valid_target(self, target):
     ip, mac = target
@@ -1073,12 +1085,9 @@ class ARPPoisoner(Thread):
   def run(self):
     self.create_device_socket()
     if context.options.no_arp:
-      arp_logger.info(
-        "ARP server started in harmless mode."
-      )
+      arp_logger.info("ARP server started in harmless mode.")
       self._pariodically_update_router_adress()
     else:
-      arp_logger.info("ARP poisonner has started.")
       if self.context.options.respond_only:
         self._run_on_responses()
       else:
@@ -1091,9 +1100,6 @@ class ARPPoisoner(Thread):
     )
     lower_privilege()
     self.device_socket.bind((self.context.device, socket.SOCK_RAW))
-    arp_logger.debug(
-      "Raw socket for %s created." % self.context.device
-    )
 
   def stop(self):
     logger.info("ARP Poisonner stopping...", color=ARP_COLOR)
@@ -1104,7 +1110,7 @@ class ARPPoisoner(Thread):
 
   def _run_at_pace(self):
     self.running = True
-    arp_logger.info("Running at a pace of 1 ARP per %d seconds." % (
+    arp_logger.info("ARP poisonner started: 1 ARP per %d seconds." % (
       self.context.options.arp_elapse_time
     ))
     while self.running:
@@ -1120,10 +1126,11 @@ class ARPPoisoner(Thread):
     )
     lower_privilege()
     s.settimeout(1)
-    arp_logger.info("Interactive mode.")
+    arp_logger.info("ARP poisonner started: Interactive mode.")
     while self.running:
       try:
-        self.update_router_adress()
+        if self.context.options.router_mac is None:
+          self.update_router_adress()
         packet = s.recvfrom(65565)[0]
         packet = Layer4(packet)
         if packet.contains_arp:
@@ -1136,18 +1143,15 @@ class ARPPoisoner(Thread):
 
   def _pariodically_update_router_adress(self):
     self.running = True
-    arp_logger.info(
-      "Just update the ARP table for the DNS spoofer."
-    )
+    arp_logger.info("Just update the ARP table for the DNS spoofer.")
     while self.running:
       self.update_router_adress()
       time.sleep(self.context.options.arp_elapse_time)
 
   def update_router_adress(self):
-    if time.time() - self.last_router_adress_update > 3600:
-      self.last_router_adress_update = time.time()
+    if time.time() - self.context.last_router_mac_update > 3600:
       arp_logger.info("Periocical update of the router's MAC adress.")
-      return self.send_router_arp_query()
+      self.send_router_arp_query()
 
   def send_router_arp_query(self):
     arp_logger.info(
@@ -1488,14 +1492,14 @@ def set_global_parser_options(parser):
   parser.add_option(
     "-H", "--hosts_file",
     dest="hosts",
-    default="hosts",
+    default="./hosts",
     help="The host file that tells the routing rules.",
     metavar="FILE"
   )
   parser.add_option(
     "-t", "--targets_file",
     dest="targets",
-    default="targets",
+    default="./targets",
     help="The file containing the targeted IPs.",
     metavar="FILE"
   )
@@ -1571,6 +1575,13 @@ def match_ipv6 (ip):
     "(::([0-9A-Fa-f]{1,4}:){0,6}[0-9A-Fa-f]{1,4})|" \
     "(([0-9A-Fa-f]{1,4}:){1,7}:))$",
     ip
+  ) is not None
+
+def match_mac (mac):
+  """ Test if the given ip is a MAC """
+  return re.match (
+    "^([A-Fa-f0-9]{2}:){5}[A-Fa-f0-9]{2}$",
+    mac
   ) is not None
 
 def create_pid_file(context, no=0):
