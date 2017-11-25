@@ -7,10 +7,17 @@ import logging
 import optparse
 import os
 import re
+import socket
+from struct import pack, unpack
 import sys
 import time
+from threading import Thread
 
 
+BROADCAST_MAC = pack("!6B", *(255,)*6)
+BROADCAST_IP = pack("!4B", *(255,)*4)
+EMPTY_MAC = pack("!6B", *(0,)*6)
+EMPTY_IP = pack("!4B", *(0,)*4)
 RED, GREEN, ORANGE, BLUE, PURPLE, LBLUE, GREY = \
   map("\33[%dm".__mod__, range(31, 38))
 DNS_COLOR = GREY
@@ -936,6 +943,294 @@ class TmpCtx(dict):
 
   def __setattr__(self, attr, value):
     self[attr] = value
+
+
+class ARPPoisoner(Thread):
+
+  def __init__(self, context):
+    super().__init__()
+    self.context = context
+    self.running = False
+    self.last_router_adress_update = 0
+
+  def run(self):
+    self.create_device_socket()
+    if context.options.no_arp:
+      arp_logger.info(
+        "ARP server started in harmless mode."
+      )
+      self._pariodically_update_router_adress()
+    else:
+      arp_logger.info("ARP poisonner has started.")
+      if self.context.options.respond_only:
+        self._run_on_responses()
+      else:
+        self._run_at_pace()
+
+  def create_device_socket(self):
+    elevate_privilege()
+    self.device_socket = socket.socket(
+      socket.AF_PACKET, socket.SOCK_RAW, socket.SOCK_RAW
+    )
+    lower_privilege()
+    self.device_socket.bind((self.context.device, socket.SOCK_RAW))
+    arp_logger.debug(
+      "Raw socket for %s created." % self.context.device
+    )
+
+  def stop(self):
+    logger.info("ARP Poisonner stopping...", color=ARP_COLOR)
+    self.running = False
+    if self.is_alive():
+      self.join()
+    logger.info("ARP Poisonner stopped.", color=ARP_COLOR)
+
+  def _run_at_pace(self):
+    self.running = True
+    arp_logger.info("Running at a pace of 1 ARP per %d seconds." % (
+      self.context.options.arp_elapse_time
+    ))
+    while self.running:
+      self.update_router_adress()
+      self.send_i_is_the_rooter()
+      time.sleep(self.context.options.arp_elapse_time)
+
+  def _run_on_responses(self):
+    self.running = True
+    elevate_privilege()
+    s = socket.socket(
+      socket.AF_PACKET , socket.SOCK_RAW , socket.ntohs(0x0003)
+    )
+    lower_privilege()
+    s.settimeout(1)
+    arp_logger.info("Interactive mode.")
+    while self.running:
+      try:
+        self.update_router_adress()
+        packet = s.recvfrom(65565)[0]
+        packet = Layer4(packet)
+        if packet.contains_arp:
+          self.process_arp(packet)
+      except socket.timeout:
+        continue
+      except KeyboardInterrupt:
+        self.stop()
+    self.device_socket.close()
+
+  def _pariodically_update_router_adress(self):
+    self.running = True
+    arp_logger.info(
+      "Just update the ARP table for the DNS spoofer."
+    )
+    while self.running:
+      self.update_router_adress()
+      time.sleep(self.context.options.arp_elapse_time)
+
+  def update_router_adress(self):
+    if time.time() - self.last_router_adress_update > 3600:
+      self.last_router_adress_update = time.time()
+      arp_logger.info("Periocical update of the router's MAC adress.")
+      return self.send_router_arp_query()
+
+  def send_router_arp_query(self):
+    arp_logger.info(
+      "Sending ARP Request for router [IP=%s]." % self.context.router_ip
+    )
+    raw_mac_source = pack("!6B", *[
+      int(x, 16)for x in self.context.mac.split(':')
+    ])
+    raw_ip_target = pack("!4B", *map(
+      int, self.context.router_ip.split('.')
+    ))
+    raw_ip_source = pack("!4B", *map(
+      int, self.context.ip.split('.')
+    ))
+    arp = Layer4()
+    arp.eth_mac_target = BROADCAST_MAC
+    arp.eth_mac_source = raw_mac_source
+    arp.eth_data_protocol = Layer3.ARP
+    arp.arp_network_type = Layer4.ETHERNET
+    arp.arp_protocol_type = Layer3.IPV4
+    arp.arp_hw_addr_length = pack("!B", 0x0006)
+    arp.arp_sw_addr_length = pack("!B", 0x0004)
+    arp.arp_operation = Layer4.ARP_REQUEST
+    arp.arp_mac_source = raw_mac_source
+    arp.arp_ip_source = raw_ip_source
+    arp.arp_mac_target = EMPTY_MAC
+    arp.arp_ip_target = raw_ip_target
+    self.device_socket.send(arp.raw_data)
+
+  def process_arp(self, packet):
+    if packet.is_arp_request:
+      self.process_arp_request(packet)
+    else:
+      self.process_arp_response(packet)
+
+  def process_arp_request(self, packet):
+    if socket.inet_ntoa(packet.arp_ip_source) == self.context.ip:
+      filtered = ""
+    else:
+      filtered = " [FILTERED (TODO)]"
+    arp_logger.info("%s[%s] asks who is %s ? %s" % (
+      socket.inet_ntoa(packet.arp_ip_source),
+      printable_mac(packet.eth_mac_source),
+      socket.inet_ntoa(packet.arp_ip_target),
+      filtered
+    ))
+
+  def process_arp_response(self, packet):
+    ip_source = socket.inet_ntoa(packet.arp_ip_source)
+    mac_source = printable_mac(packet.eth_mac_source)
+    if ip_source == self.context.router_ip:
+      self.context.arp_table[ip_source] = (mac_source, time.time())
+      stored = " [STORED]"
+    else:
+      stored = ""
+    arp_logger.info("%s is at %s" % (
+      ip_source, mac_source
+    )+stored)
+
+  def send_i_is_the_rooter(self):
+    for mac, ip in self.context.targets:
+      arp_logger.info("Sending fake ARP to %s[%s]." % (ip, mac))
+      self.device_socket.send(
+        self.craft_i_is_router_arp_response(mac, ip)
+      )
+
+  def craft_i_is_router_arp_response(self, mac, ip):
+    self.create_no_fake_arp()
+
+  def create_no_fake_arp(self):
+    packet = ARPPacket()
+    packet.sender_ip = self.context.ip
+
+  def forward_to_router(self, packet):
+    arp_logger.info("Forwarding packet to router...")
+
+
+class DNSSpoofer(object):
+
+  def __init__(self, context):
+    self.context = context
+    self.running = False
+    self.forward_answer = {}
+    self.table = {}
+
+  def create_device_socket(self):
+    elevate_privilege()
+    self.device_socket = socket.socket(
+      socket.AF_PACKET, socket.SOCK_RAW, socket.SOCK_RAW
+    )
+    lower_privilege()
+    self.device_socket.bind((self.context.device, socket.SOCK_RAW))
+
+  def run(self):
+    dns_logger.info("DNS spoofer has started.")
+    self.create_device_socket()
+    self._run()
+    dns_logger.info("DNS Spoofer stopped.")
+
+  def _run(self):
+    self.running = True
+    elevate_privilege()
+    s = socket.socket(
+      socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(0x0003)
+    )
+    lower_privilege()
+    s.settimeout(1)
+    self.ctx = TmpCtx({
+      "router_ip": self.context.router_ip,
+      "raw_router_ip": pack(
+        "!4B", *map(int, self.context.router_ip.split("."))
+      ),
+    })
+    while self.running:
+      try:
+        packet = Layer7(s.recvfrom(65565)[0])
+        if packet.is_dns:
+          self.process_dns_packet(packet)
+      except socket.timeout:
+        continue
+      except KeyboardInterrupt:
+        self.stop()
+        break
+    self.device_socket.close()
+
+  def init_tmp_ctx(self, packet):
+    self.ctx.raw_target_ip = packet.ip_ip_target
+    self.ctx.raw_target_mac = packet.eth_mac_target
+    self.ctx.raw_source_ip = packet.ip_ip_source
+    self.ctx.raw_source_mac = packet.eth_mac_source
+    self.ctx.target_ip = socket.inet_ntoa(packet.ip_ip_target)
+    self.ctx.target_mac = printable_mac(self.ctx.raw_target_mac)
+    self.ctx.source_ip = socket.inet_ntoa(packet.ip_ip_source)
+    self.ctx.source_mac = printable_mac(self.ctx.raw_source_mac)
+    self.ctx.router_ip = self.context.router_ip
+    self.ctx.router_mac = self.context.get_router_mac()
+    self.ctx.raw_router_ip = pack(
+      "!4B", *map(int, self.ctx.router_ip.split("."))
+    )
+    self.ctx.raw_router_mac = pack(
+      "!6B", *[int(x, 16) for x in self.ctx.router_mac.split(":")]
+    )
+
+  def process_dns_packet(self, packet):
+    self.init_tmp_ctx(packet)
+    if self.ctx.source_ip != "127.0.0.1" and \
+        self.context.is_valid_target((
+          self.ctx.source_ip, self.ctx.source_mac
+    )):
+      if packet.is_dns_query:
+        self.process_dns_question(packet)
+      else:
+        self.process_dns_answer(packet)
+
+  def process_dns_question(self, dns):
+    server_name = DNSData(dns).query_name.decode("utf-8")
+    dns_logger.info("%s[%s] asked for %s" % (
+      self.ctx.source_ip, self.ctx.source_mac, server_name
+    ))
+    if server_name in self.table:
+      #self.inject(self.forge_response(dns, server_name))
+      self.forge_response(dns, server_name)
+    else:
+      self.forward_to_router(dns)
+
+  def forge_response(self, dns, server_name):
+    dns_logger.info("Forge DNS response for %s [TODO]" % server_name)
+    return dns
+
+  def forward_to_router(self, dns):
+    if not self.context.know_router_mac():
+      dns_logger.error(
+        "Could not forward DNS query! Packet lost!", color=RED
+      )
+    self.forward_answer[dns.dns_trans_id] = (
+      self.ctx.raw_source_ip, self.ctx.raw_source_mac
+    )
+    if self.ctx.router_mac:
+      dns_logger.info("Forwarding DNS query %s to router." % (
+        ''.join(["0x%02x"%i for i in dns.dns_trans_id])
+      ))
+      dns.eth_mac_target = self.ctx.raw_router_mac
+      dns.ip_ip_target = self.ctx.raw_router_ip
+      return
+      self.inject(dns)
+
+  def process_dns_answer(self, dns):
+    adress = self.forward_answer.get(idf, None)
+    if adress is not None:
+      dns.ip_ip_target, dns.eth_mac_target = adress
+      dns.set_udp_checksum()
+      return
+      self.inject(dns)
+
+  def inject(self, packet):
+    self.device_socket.send(packet.raw_data)
+
+  def stop(self):
+    print(DNS_COLOR+"DNS Spoofer stopping..."+NO_COLOR)
+    self.running = False
 
 
 ## I stole the checksum calculation method from scapy (utils.py)
