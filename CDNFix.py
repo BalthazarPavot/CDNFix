@@ -120,6 +120,393 @@ class Layer3(Packet):
     return self.eth_data_protocol == Layer3.IPV6
 
 
+class Layer4(Layer3):
+
+  ## IP
+  IP_VERSION_SLICE = slice(0, 1)
+  IP_DSF_SLICE = slice(1, 2)
+  IP_TOTAL_LENGTH_SLICE = slice(2, 4)
+  IP_IDENTIFICATION_SLICE = slice(4, 6)
+  IP_FRAG_OFF_SLICE = slice(6, 8)
+  IP_TTL_SLICE = slice(8, 9)
+  IP_PROTOCOL_SLICE = slice(9, 10)
+  TCP_PROTOCOL = pack("!B", 0x0006)
+  UDP_PROTOCOL = pack("!B", 0x0011)
+  IP_CKSM_SLICE = slice(10, 12)
+  IP_IP_SOURCE_SLICE = slice(12, 16)
+  IP_IP_TARGET_SLICE = slice(16, 20)
+
+  ## UDP
+  UDP_SOURCE_PORT = slice(0, 2)
+  UDP_DESTINATION_PORT = slice(2, 4)
+  UDP_LENGTH = slice(4, 6)
+  UDP_CKSM = slice(6, 8)
+
+  ## TCP
+  TCP_SOURCE_PORT = slice(2, 4)
+  TCP_DESTINATION_PORT = slice(2, 4)
+
+  ## ARP
+  ARP_NETWORK_TYPE_SLICE = slice(0, 2)
+  ETHERNET = pack("!H", 0x0001)
+  ARP_PROTOCOL_TYPE_SLICE = slice(2, 4)
+  ARP_HW_ADDR_LENGTH_SLICE = slice(4, 5)
+  ARP_SW_ADDR_LENGTH_SLICE = slice(5, 6)
+  ARP_OPERATION_SLICE = slice(6, 8)
+  ARP_MAC_SOURCE_SLICE = slice(8, 14)
+  ARP_IP_SOURCE_SLICE = slice(14, 18)
+  ARP_MAC_TARGET_SLICE = slice(18, 24)
+  ARP_IP_TARGET_SLICE = slice(24, 28)
+  ARP_REQUEST = pack("!H", 0x0001)
+  ARP_RESPONSE = pack("!H", 0x0002)
+
+  @property
+  def layer4_ip_length(self):
+    if self.contains_ipv4:
+      ## ihl contains the number 32 bits words in the ip layer.
+      return self.ip_ihl * 4
+    elif self.contains_arp:
+      ## ARP is always 28 bytes long
+      return 28
+    return 0
+
+  @property
+  def layer4_length(self):
+    if self.contains_ipv4:
+      if self.is_udp:
+        return 8
+      elif self.is_tcp:
+        return self.tcp_length
+    return 0
+
+  @property
+  def layer4_ip_offset(self):
+    return self.layer3_offset + self.layer4_ip_length
+
+  @property
+  def layer4_offset(self):
+    return self.layer4_ip_offset + self.layer4_length
+
+  ## IP header
+
+  @property
+  def ip_version(self):
+    return (self[Layer4.IP_VERSION_SLICE, self.layer3_offset][0] & 0b11110000) >> 4
+
+  @ip_version.setter
+  def ip_version(self, ip_version):
+    self[Layer4.IP_VERSION_SLICE, self.layer3_offset] = (ip_version << 4) | self.ip_ihl
+
+  @property
+  def ip_ihl(self):
+    return self[Layer4.IP_VERSION_SLICE, self.layer3_offset][0] & 0b00001111
+
+  @ip_ihl.setter
+  def ip_ihl(self, ip_ihl):
+    self[Layer4.IP_VERSION_SLICE, self.layer3_offset] = (self.ip_version << 4) | ip_ihl
+
+  @property
+  def ip_dsf(self):
+    return self[Layer4.IP_DSF_SLICE, self.layer3_offset]
+
+  @ip_dsf.setter
+  def ip_dsf(self, ip_dsf):
+    self[Layer4.IP_DSF_SLICE, self.layer3_offset] = ip_dsf
+
+  @property
+  def ip_identification(self):
+    return self[Layer4.IP_IDENTIFICATION_SLICE, self.layer3_offset]
+
+  @ip_identification.setter
+  def ip_identification(self, ip_identification):
+    self[Layer4.IP_IDENTIFICATION_SLICE, self.layer3_offset] = ip_identification
+
+  @property
+  def ip_fragment_offset(self):
+    return self[Layer4.IP_FRAG_OFF_SLICE, self.layer3_offset]
+
+  @ip_fragment_offset.setter
+  def ip_fragment_offset(self, ip_fragment_offset):
+    self[Layer4.IP_FRAG_OFF_SLICE, self.layer3_offset] = ip_fragment_offset
+
+  @property
+  def ip_time_to_live(self):
+    return self[Layer4.IP_TTL_SLICE, self.layer3_offset]
+
+  @ip_time_to_live.setter
+  def ip_time_to_live(self, ip_time_to_live):
+    self[Layer4.IP_TTL_SLICE, self.layer3_offset] = ip_time_to_live
+
+  @property
+  def ip_protocol(self):
+    return self[Layer4.IP_PROTOCOL_SLICE, self.layer3_offset]
+
+  @ip_protocol.setter
+  def ip_protocol(self, ip_protocol):
+    self[Layer4.IP_PROTOCOL_SLICE, self.layer3_offset] = ip_protocol
+
+  @property
+  def ip_checksum(self):
+    return self[Layer4.IP_CKSM_IP_SLICE, self.layer3_offset]
+
+  @ip_checksum.setter
+  def ip_checksum(self, ip_checksum):
+    self[Layer4.IP_CKSM_IP_SLICE, self.layer3_offset] = ip_checksum
+
+  @property
+  def ip_ip_source(self):
+    return self[Layer4.IP_IP_SOURCE_SLICE, self.layer3_offset]
+
+  @ip_ip_source.setter
+  def ip_ip_source(self, ip_ip_source):
+    self[Layer4.IP_IP_SOURCE_SLICE, self.layer3_offset] = ip_ip_source
+
+  @property
+  def ip_ip_target(self):
+    return self[Layer4.IP_IP_TARGET_SLICE, self.layer3_offset]
+
+  @ip_ip_target.setter
+  def ip_ip_target(self, ip_ip_target):
+    self[Layer4.IP_IP_TARGET_SLICE, self.layer3_offset] = ip_ip_target
+
+  ## ARP header
+
+  @property
+  def arp_network_type(self):
+    return self[Layer4.ARP_NETWORK_TYPE_SLICE, self.layer3_offset]
+
+  @arp_network_type.setter
+  def arp_network_type(self, network_type):
+    self[Layer4.ARP_NETWORK_TYPE_SLICE, self.layer3_offset] = network_type
+
+  @property
+  def arp_protocol_type(self):
+    return self[Layer4.ARP_PROTOCOL_TYPE_SLICE, self.layer3_offset]
+
+  @arp_protocol_type.setter
+  def arp_protocol_type(self, protocol_type):
+    self[Layer4.ARP_PROTOCOL_TYPE_SLICE, self.layer3_offset] = protocol_type
+
+  @property
+  def arp_hw_addr_length(self):
+    return self[Layer4.ARP_HW_ADDR_LENGTH_SLICE, self.layer3_offset]
+
+  @arp_hw_addr_length.setter
+  def arp_hw_addr_length(self, hw_addr_length):
+    self[Layer4.ARP_HW_ADDR_LENGTH_SLICE, self.layer3_offset] = hw_addr_length
+
+  @property
+  def arp_sw_addr_length(self):
+    return self[Layer4.ARP_SW_ADDR_LENGTH_SLICE, self.layer3_offset]
+
+  @arp_sw_addr_length.setter
+  def arp_sw_addr_length(self, sw_addr_length):
+    self[Layer4.ARP_SW_ADDR_LENGTH_SLICE, self.layer3_offset] = sw_addr_length
+
+  @property
+  def arp_operation(self):
+    return self[Layer4.ARP_OPERATION_SLICE, self.layer3_offset]
+
+  @arp_operation.setter
+  def arp_operation(self, arp_operation):
+    self[Layer4.ARP_OPERATION_SLICE, self.layer3_offset] = arp_operation
+
+  @property
+  def arp_mac_source(self):
+    return self[Layer4.ARP_MAC_SOURCE_SLICE, self.layer3_offset]
+
+  @arp_mac_source.setter
+  def arp_mac_source(self, arp_mac_source):
+    self[Layer4.ARP_MAC_SOURCE_SLICE, self.layer3_offset] = arp_mac_source
+
+  @property
+  def arp_ip_source(self):
+    return self[Layer4.ARP_IP_SOURCE_SLICE, self.layer3_offset]
+
+  @arp_ip_source.setter
+  def arp_ip_source(self, arp_ip_source):
+    self[Layer4.ARP_IP_SOURCE_SLICE, self.layer3_offset] = arp_ip_source
+
+  @property
+  def arp_mac_target(self):
+    return self[Layer4.ARP_MAC_TARGET_SLICE, self.layer3_offset]
+
+  @arp_mac_target.setter
+  def arp_mac_target(self, arp_mac_target):
+    self[Layer4.ARP_MAC_TARGET_SLICE, self.layer3_offset] = arp_mac_target
+
+  @property
+  def arp_ip_target(self):
+    return self[Layer4.ARP_IP_TARGET_SLICE, self.layer3_offset]
+
+  @arp_ip_target.setter
+  def arp_ip_target(self, arp_ip_target):
+    self[Layer4.ARP_IP_TARGET_SLICE, self.layer3_offset] = arp_ip_target
+
+  @property
+  def is_arp_request(self):
+    return self.arp_operation == Layer4.ARP_REQUEST
+
+  @property
+  def is_arp_response(self):
+    return self.arp_operation == Layer4.ARP_RESPONSE
+
+  ## UDP header
+
+  @property
+  def is_udp(self):
+    return self.ip_protocol == Layer4.UDP_PROTOCOL
+
+  @property
+  def udp_source_port(self):
+    return self[Layer4.UDP_SOURCE_PORT, self.layer4_ip_offset]
+
+  @udp_source_port.setter
+  def udp_source_port(self, udp_source_port):
+    self[Layer4.UDP_SOURCE_PORT, self.layer4_ip_offset] = udp_source_port
+
+  @property
+  def udp_destination_port(self):
+    return self[Layer4.UDP_DESTINATION_PORT, self.layer4_ip_offset]
+
+  @udp_destination_port.setter
+  def udp_destination_port(self, udp_destination_port):
+    self[Layer4.UDP_DESTINATION_PORT, self.layer4_ip_offset] = udp_destination_port
+
+  @property
+  def udp_length(self):
+    return self[Layer4.UDP_LENGTH, self.layer4_ip_offset]
+
+  @udp_length.setter
+  def udp_length(self, udp_length):
+    self[Layer4.UDP_LENGTH, self.layer4_ip_offset] = udp_length
+
+  @property
+  def udp_checksum(self):
+    return self[Layer4.UDP_CKSM, self.layer4_ip_offset]
+
+  @udp_checksum.setter
+  def udp_checksum(self, udp_checksum):
+    self[Layer4.UDP_CKSM, self.layer4_ip_offset] = udp_checksum
+
+  def set_udp_checksum(self, data_length):
+    self.udp_checksum = self.udp_computed_checksum
+
+  @property
+  def udp_computed_checksum(self):
+    stop = Layer4.UDP_CKSM.stop + self.layer4_ip_offset
+    data = \
+      self.ip_ip_source + \
+      self.ip_ip_target + \
+      b"\x00\x11" + \
+      self.udp_length + \
+      self.udp_source_port + \
+      self.udp_destination_port + \
+      self.udp_length + \
+      b"\x00\x00" + \
+      self.raw_data[stop:]
+    return pack("!H", checksum(data))
+
+  ## TCP header
+
+  @property
+  def is_tcp(self):
+    return self.ip_protocol == Layer4.TCP_PROTOCOL
+
+  @property
+  def tcp_source_port(self):
+    return self[Layer4.TCP_SOURCE_PORT, self.layer4_ip_offset]
+
+  @tcp_source_port.setter
+  def tcp_source_port(self, tcp_source_port):
+    self[Layer4.TCP_SOURCE_PORT, self.layer4_ip_offset] = tcp_source_port
+
+  @property
+  def tcp_destination_port(self):
+    return self[Layer4.TCP_DESTINATION_PORT, self.layer4_ip_offset]
+
+  @tcp_destination_port.setter
+  def tcp_destination_port(self, tcp_destination_port):
+    self[Layer4.TCP_DESTINATION_PORT, self.layer4_ip_offset] = tcp_destination_port
+
+  @property
+  def tcp_sequence_number(self):
+    return self[Layer4.TCP_SEQUENCE_NUMBER, self.layer4_ip_offset]
+
+  @tcp_sequence_number.setter
+  def tcp_sequence_number(self, tcp_sequence_number):
+    self[Layer4.TCP_SEQUENCE_NUMBER, self.layer4_ip_offset] = tcp_sequence_number
+
+  @property
+  def tcp_ack_number(self):
+    return self[Layer4.TCP_ACK_NUMBER, self.layer4_ip_offset]
+
+  @tcp_ack_number.setter
+  def tcp_ack_number(self, tcp_ack_number):
+    self[Layer4.TCP_ACK_NUMBER, self.layer4_ip_offset] = tcp_ack_number
+
+  @property
+  def tcp_header_length(self):
+    return self[Layer4.TCP_HEADER_LENGTH, self.layer4_ip_offset]
+
+  @tcp_header_length.setter
+  def tcp_header_length(self, tcp_header_length):
+    self[Layer4.TCP_HEADER_LENGTH, self.layer4_ip_offset] = tcp_header_length
+
+  @property
+  def tcp_flags(self):
+    return self[Layer4.TCP_FLAGS, self.layer4_ip_offset]
+
+  @tcp_flags.setter
+  def tcp_flags(self, tcp_flags):
+    self[Layer4.TCP_FLAGS, self.layer4_ip_offset] = tcp_flags
+
+  @property
+  def tcp_window_size(self):
+    return self[Layer4.TCP_WINDOW_SIZE, self.layer4_ip_offset]
+
+  @tcp_window_size.setter
+  def tcp_window_size(self, tcp_window_size):
+    self[Layer4.TCP_WINDOW_SIZE, self.layer4_ip_offset] = tcp_window_size
+
+  @property
+  def tcp_cksm(self):
+    return self[Layer4.TCP_CKSM, self.layer4_ip_offset]
+
+  @tcp_cksm.setter
+  def tcp_cksm(self, tcp_cksm):
+    self[Layer4.TCP_CKSM, self.layer4_ip_offset] = tcp_cksm
+
+  @property
+  def tcp_urgent_pointer(self):
+    return self[Layer4.TCP_URGENT_POINTER, self.layer4_ip_offset]
+
+  @tcp_urgent_pointer.setter
+  def tcp_urgent_pointer(self, tcp_urgent_pointer):
+    self[Layer4.TCP_URGENT_POINTER, self.layer4_ip_offset] = tcp_urgent_pointer
+
+  @property
+  def tpc_has_options(self):
+    ## 32, usualy. Because optns = 12
+    return unpach("!B", self.tcp_header_length)[0] > 20
+
+  @property
+  def tcp_options(self):
+    return self[Layer4.TCP_OPTIONS, self.layer4_ip_offset]
+
+  @tcp_options.setter
+  def tcp_options(self, tcp_options):
+    self[Layer4.TCP_OPTIONS, self.layer4_ip_offset] = tcp_options
+
+  @property
+  def tcp_data(self):
+    return self[Layer4.TCP_DATA, self.layer4_ip_offset]
+
+  @tcp_data.setter
+  def tcp_data(self, tcp_data):
+    self[Layer4.TCP_DATA, self.layer4_ip_offset] = tcp_data
+
+
 class Context(object):
 
   def __init__(
