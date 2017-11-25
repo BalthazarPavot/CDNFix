@@ -924,6 +924,20 @@ class Context(object):
     return True
 
 
+class TmpCtx(dict):
+
+  def __init__(self, *args, **kwargs):
+    super().__init__(*args, **kwargs)
+
+  def __getattr__(self, attr):
+    if attr in self:
+      return self[attr]
+    raise AttributeError()
+
+  def __setattr__(self, attr, value):
+    self[attr] = value
+
+
 def elevate_privilege():
   os.seteuid(0)
 
