@@ -19,6 +19,7 @@
 ######################################################################
 
 # let's say our own CDN replacement server's IP is 192.168.1.2
+# the list of DNS is taken from the decentraleyes project.
 
 ajax.googleapis.com	192.168.1.2
 ajax.aspnetcdn.com	192.168.1.2
