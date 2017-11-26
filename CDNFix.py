@@ -4,6 +4,7 @@
 
 import array
 import atexit
+import functools
 import logging
 import optparse
 import os
@@ -823,8 +824,13 @@ class Context(object):
     self.arp_table = {}
     self.dns_spoofer = None
     self.arp_poisoner = None
+    self.dns_records = {}
+    self.targets_regex = set()
+    self.targets_ips = None
     self.check_parameters()
     self.gather_informations()
+    self.parse_hosts()
+    self.parse_targets()
 
   @property
   def ip(self):
@@ -1040,8 +1046,92 @@ class Context(object):
         logger.error("Bad router IP adress.")
       logger.debug("%-15s%-20s [OK]" % ("DNS IP:", self.options.dns_ip))
 
+  def parse_hosts(self):
+    with open(self.options.hosts) as hosts_file:
+      for line in hosts_file.readlines():
+        line = re.split("\s+", line.split("#")[0])
+        if len(line) == 2:
+          self.dns_records[line[0]] = line[1]
+
+  def parse_targets(self):
+    """
+    This part of the program is becomming huge and out of purpose.
+    I should create an IP class and IPRange class to manipulate
+    more easily IPs.
+    It uses `complement_ip`, `get_target_ips` and the
+    `is_valid_target` method is also involved in ip range
+    calculation... There's too much out-of-purpose code, here.
+    """
+    with open(self.options.targets) as targets_file:
+      for line in targets_file.readlines():
+        line = line.split("#")[0].replace("\n", '')
+        if line:
+          ip = self.complement_ip(line)
+          self.targets_regex.add(ip.replace("*", "1-254"))
+    self.targets_ips = self.get_target_ips()
+
+  def complement_ip(self, line):
+    """
+    Complement the IP if it is the short notation:
+    .64 gives 192.168.1.64 if our IP begins with "192.168.1"
+    """
+    if line.startswith("."):
+      index = 0
+      for _ in range(4-line.count(".")):
+        index = self.ip.index(".", index)+1
+      return self.ip[:index] + line[1:]
+    return line
+
+  def get_target_ips(self):
+    targets = set()
+    for target in self.targets_regex:
+      parts = []
+      for ip_part in target.split("."):
+        if "-" in ip_part:
+          try:
+            begin, end = map(int, ip_part.split("-"))
+          except ValueError:
+            break
+          if begin > end:
+            begin, end = end, begin
+          if 0 < end < 255:
+            parts.append(list(map(str, range(begin, end+1))))
+        else:
+          try:
+            if 0 < int(ip_part) < 255:
+              parts.append([ip_part])
+          except ValueError:
+            break
+      if len(parts) != 4:
+        continue
+      # If the total number of IPs > 4096, we stop storing IPs.
+      # We just return None, telling that there are too many IPs.
+      # It is critical in IPv6 adresses, where there can be large
+      # ranges of IPs (like billions of IPs).
+      ip_number = functools.reduce(int.__mul__, map(len, parts), 1)
+      if len(targets) + ip_number > 4096:
+        return None
+      targets.update(map(".".join, combinaisons(parts)))
+    return targets
+
   def is_valid_target(self, target):
     ip, mac = target
+    if self.targets_ips is not None:
+      return ip in self.targets_ips
+    # self.targets_ips can be none if the total number of targeted
+    # IPs is too high.
+    # In this case, we use a more "intelligent" verification
+    for target in self.targets_regex:
+      parts = zip(ip.split("."), target.split("."))
+      for ip_part, target_part in parts:
+        if "-" in target_part:
+          begin, end = map(int, target_part.split("-"))
+          if begin > end:
+            begin, end = end, begin
+          if not begin <= int(ip_part) <= end:
+            return False
+        elif ip_part != target_part:
+          return False
     return True
 
 
@@ -1584,6 +1674,14 @@ def match_mac (mac):
     mac
   ) is not None
 
+def combinaisons(x):
+  if len(x) == 1:
+    return x[0]
+  return [
+    (i, )+j if isinstance(j, tuple) else (i, j)
+    for i in x[0] for j in combinaisons(x[1:])
+  ]
+
 def create_pid_file(context, no=0):
   path = context.options.pidfile
   if no:
@@ -1614,7 +1712,7 @@ if __name__ == "__main__":
   # we will upper privilege only when needed.
   lower_privilege()
 
-  logging.basicConfig(format="[%(levelname)-12s] %(message)s", level=logging.DEBUG)
+  logging.basicConfig(format="[%(levelname)-10s] %(message)s", level=logging.DEBUG)
   logger = logging.getLogger(os.path.basename(__file__))
   color_logger(logger)
   logger.critical = attach_critical_callback(logger.critical)
@@ -1624,12 +1722,12 @@ if __name__ == "__main__":
   arp_logger.propagate = False
   dns_sh = logging.StreamHandler()
   dns_sh.setFormatter(logging.Formatter(
-    DNS_COLOR+"[DNS-%(levelname)-8s] %(message)s"+NO_COLOR
+    DNS_COLOR+"[DNS-%(levelname)-6s] %(message)s"+NO_COLOR
   ))
   dns_logger.addHandler(dns_sh)
   arp_sh = logging.StreamHandler()
   arp_sh.setFormatter(logging.Formatter(
-    ARP_COLOR+"[ARP-%(levelname)-8s] %(message)s"+NO_COLOR
+    ARP_COLOR+"[ARP-%(levelname)-6s] %(message)s"+NO_COLOR
   ))
   arp_logger.addHandler(arp_sh)
   color_logger(dns_logger, overall_color=DNS_COLOR)
