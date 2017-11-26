@@ -15,10 +15,10 @@
 ##  The ip on the same network than CDNFix, finishing with .34      ##
 ##                                                                  ##
 ## For example:                                                     ##
-##  re:192.168.128.*                                                ##
-##  re:192.168.1.34-38                                              ##
+##  192.168.128.*                                                   ##
+##  192.168.1.34-38                                                 ##
 ##  192.168.4.72                                                    ##
-##  re:.*  # This is the default behaviour                          ##
+##  .*  # This is the default behaviour                             ##
 ##                                                                  ##
 ##                                                                  ##
 ## The IP should be on the same LAN as CDNFix.                      ##
@@ -36,4 +36,4 @@
 
 # That's the basic config: Applied to all the network we're on.
 # The router IP will be ignored.
-re:.*
+.*
