@@ -15,7 +15,7 @@ import sys
 import time
 from threading import Thread
 
-
+DISPLAYABLE_BROADCAST_MAC = ":".join(("ff", )*6)
 BROADCAST_MAC = pack("!6B", *(255,)*6)
 BROADCAST_IP = pack("!4B", *(255,)*4)
 EMPTY_MAC = pack("!6B", *(0,)*6)
@@ -831,6 +831,18 @@ class Context(object):
     self.gather_informations()
     self.parse_hosts()
     self.parse_targets()
+
+  @property
+  def broadcast_ip(self):
+    return self._broadcast_ip
+
+  @broadcast_ip.setter
+  def broadcast_ip(self, broadcast_ip):
+    self._broadcast_ip = broadcast_ip
+
+  @property
+  def broadcast_mac(self):
+    return DISPLAYABLE_BROADCAST_MAC
 
   @property
   def ip(self):
