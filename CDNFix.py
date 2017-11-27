@@ -1056,9 +1056,7 @@ class Context(object):
       logger.debug("%-15s%-20s [OK]" % ("Router MAC:", self.options.router_mac))
 
   def check_arp_options(self):
-    if not self.options.no_arp:
-      if self.options.arp_elapse_time <= 0:
-        logger.critical("Bad elapsed time.")
+    pass
 
   def check_dns_options(self):
     self.check_dns_ip()
@@ -1618,20 +1616,6 @@ def set_global_parser_options(parser):
   )
 
 def set_arp_parser_options(arp_group):
-  arp_group.add_option(
-    "-A", "--no_arp", 
-    dest="no_arp",
-    action="store_true",
-    default=False,
-    help="Deactivates the ARP poisoner (harmless ARP Server mode).",
-  )
-  arp_group.add_option(
-    "-i", "--interactive", 
-    dest="respond_only",
-    action="store_true",
-    default=True,
-    help="Only send ARP responses when asked to by other devices.",
-  )
   arp_group.add_option(
     "-e", "--elapse_time", 
     dest="arp_elapse_time",
