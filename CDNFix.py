@@ -1125,12 +1125,12 @@ class Context(object):
             break
       if len(parts) != 4:
         continue
-      # If the total number of IPs > 4096, we stop storing IPs.
+      # If the total number of IPs > 255, we stop storing IPs.
       # We just return None, telling that there are too many IPs.
       # It is critical in IPv6 adresses, where there can be large
       # ranges of IPs (like billions of IPs).
       ip_number = functools.reduce(int.__mul__, map(len, parts), 1)
-      if len(targets) + ip_number > 4096:
+      if len(targets) + ip_number > 255:
         return None
       targets.update(map(".".join, combinaisons(parts)))
     return targets
