@@ -906,6 +906,7 @@ class Context(object):
   def gather_informations(self):
     self.ip = self.detect_self_ip()
     self.mac = self.detect_self_mac()
+    self.broadcast_ip = self.detect_broadcast_ip()
     if self.ip:
       logger.info("Detecting our IP     ... %s" % self.ip)
     else:
@@ -926,6 +927,16 @@ class Context(object):
         logger.info("Detecting router MAC ... %s" % self.router_mac)
       else:
         logger.info("Could not find router MAC. Trying later with ARP.")
+
+  def detect_broadcast_ip(self):
+    cmd = " | ".join((
+      "ip address show %(device)s", # show device info
+      "grep -Po 'inet.*brd\s\S+'",  # filter on "Bcast" word
+      "cut -d' ' -f4"               # get second part
+    )) % {
+      "device": self.device,
+    }
+    return os.popen(cmd).read().strip()
 
   def detect_self_ip(self):
     cmd = " | ".join((
