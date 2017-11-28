@@ -1310,6 +1310,10 @@ class ARPPoisoner(Thread):
     ))
 
   def process_arp_response(self, packet):
+    if self.ctx.source_ip == self.context.router_ip and \
+        self.ctx.source_mac == self.context.mac:
+      ## This arp is a fake one. Created by us.
+      return
     if self.ctx.source_ip == self.context.router_ip \
         or self.context.is_valid_target((self.ctx.source_ip, None)):
       self.context.arp_table[self.ctx.source_ip] = (
